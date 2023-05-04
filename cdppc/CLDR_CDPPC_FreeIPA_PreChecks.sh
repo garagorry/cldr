@@ -8,7 +8,23 @@
 # ------------------------------------------------------------------
 # Author: Jimmy Garagorry | jimmy@garagorry.com
 # ------------------------------------------------------------------
+# We can't trap 9) SIGKILL | 19) SIGSTOP
+#  kill -l
+#  1) SIGHUP       2) SIGINT       3) SIGQUIT      4) SIGILL       5) SIGTRAP
+#  6) SIGABRT      7) SIGBUS       8) SIGFPE       9) SIGKILL     10) SIGUSR1
+# 11) SIGSEGV     12) SIGUSR2     13) SIGPIPE     14) SIGALRM     15) SIGTERM
+# 16) SIGSTKFLT   17) SIGCHLD     18) SIGCONT     19) SIGSTOP     20) SIGTSTP
+# 21) SIGTTIN     22) SIGTTOU     23) SIGURG      24) SIGXCPU     25) SIGXFSZ
+# 26) SIGVTALRM   27) SIGPROF     28) SIGWINCH    29) SIGIO       30) SIGPWR
+# 31) SIGSYS      34) SIGRTMIN    35) SIGRTMIN+1  36) SIGRTMIN+2  37) SIGRTMIN+3
+# 38) SIGRTMIN+4  39) SIGRTMIN+5  40) SIGRTMIN+6  41) SIGRTMIN+7  42) SIGRTMIN+8
+# 43) SIGRTMIN+9  44) SIGRTMIN+10 45) SIGRTMIN+11 46) SIGRTMIN+12 47) SIGRTMIN+13
+# 48) SIGRTMIN+14 49) SIGRTMIN+15 50) SIGRTMAX-14 51) SIGRTMAX-13 52) SIGRTMAX-12
+# 53) SIGRTMAX-11 54) SIGRTMAX-10 55) SIGRTMAX-9  56) SIGRTMAX-8  57) SIGRTMAX-7
+# 58) SIGRTMAX-6  59) SIGRTMAX-5  60) SIGRTMAX-4  61) SIGRTMAX-3  62) SIGRTMAX-2
+# 63) SIGRTMAX-1  64) SIGRTMAX
 
+# Remove temporary files upon completion
 trap 'salt "*" cmd.run "
     if (( $(klist 2>/dev/null | wc -l) > 0 ))
     then
@@ -26,7 +42,61 @@ trap 'salt "*" cmd.run "
     " 2>/dev/null
 ' EXIT
 
+trap 'trap_not_exit' SIGHUP SIGINT SIGQUIT SIGTSTP
 
+# Function: trap_not_exit - Avoid CTRL + C, CTRL + Z, CTRL \ {{{1
+#-----------------------------------------------------------------------
+function trap_not_exit () 
+{
+	while true
+	do
+	  clear
+	  echo "You cannot finish this script using:"
+	  echo "CTRL + C"
+	  echo "CTRL + Z"
+	  echo "CTRL \ "
+	  echo -n "Press C + Enter to continue: "
+	  read OPC
+	  case ${OPC} in
+	    C|c)
+            clear
+		    echo "Press ENTER to get the Menu"
+	    	break
+		    ;;
+	    *)
+	    	echo ":-( Invalid Option"
+            sleep 2
+		    ;;
+	  esac
+	done
+}
+
+# Function: term_check - Validates the minimum terminal size {{{1
+#-----------------------------------------------------------------------
+function term_check () 
+{
+    if [ "${COLS}" -lt 84 ] || [ "${ROWS}" -lt 10]
+    then
+        echo "Insufficient terminal size"
+        echo "Please enlarge or maximize the size of the terminal."
+        exit 1
+    fi
+}
+
+# Function: set_term - Sanity Terminal Check {{{1
+#---------------------------------------------------------------
+function set_term () 
+{
+    # Move the cursor on upper-left corner and clear the entire screen
+    tput clear
+    # Make cursor normal visible
+    tput cnorm
+    # Exit special mode
+    tput rmcup
+}
+
+# Function: do_spin - Create the spinner for long running processes {{{1
+#-----------------------------------------------------------------------
 function do_spin ()
 {
     spinner="/|\\-/|\\-"
@@ -41,6 +111,8 @@ function do_spin ()
     done
 }
 
+# Function: do_enable_minion2master_copy - Prepare the Salt Master to Push a file from the minion {{{1
+#-----------------------------------------------------------------------
 function do_enable_minion2master_copy ()
 {
     # Create a backup of the salt master configuration file to restore after the script finish
@@ -63,6 +135,8 @@ function do_enable_minion2master_copy ()
     fi
 }
 
+# Function: recover_default_salt_master_conf - Restore Salt master Configuration {{{1
+#-----------------------------------------------------------------------
 function recover_default_salt_master_conf ()
 {
     if ! egrep 'file_recv:|file_recv_max_size:' /etc/salt/master.d/custom.conf.orig >/dev/null 2>&1
@@ -73,6 +147,8 @@ function recover_default_salt_master_conf ()
     fi
 }
 
+# Function: freeipa_services_running - List FreeIPA required services state {{{1
+#-----------------------------------------------------------------------
 function freeipa_services_running ()
 {
     FREEIPA_SERVICE_LIST="certmonger crond gssproxy httpd ipa-custodia ipa-dnskeysyncd kadmin krb5kdc named-pkcs11 nginx $(systemctl | awk '/pki-tomcatd@/ {print $1}') polkit salt-api salt-bootstrap salt-master salt-minion sshd sssd $(systemctl | awk '/dirsrv@/ {print $1}')"
@@ -90,6 +166,8 @@ function freeipa_services_running ()
     done
 }
 
+# Function: freeipa_status - Validates FreeIPA services across the IPA nodes {{{1
+#-----------------------------------------------------------------------
 function freeipa_status ()
 {
     EXIT_COUNT=$(salt '*' cmd.run 'ipactl status' 2>/dev/null | egrep -v 'successful|RUNNING|cloudera\.site' | wc -l)
@@ -102,6 +180,8 @@ function freeipa_status ()
     fi
 }
 
+# Function: freeipa_cdp_nsm - Validates CDP Node Status Monitor for VMs {{{1
+#-----------------------------------------------------------------------
 function freeipa_cdp_nsm ()
 {
     NSM_NAME="cdp-nodestatus-monitor.service"
@@ -115,6 +195,8 @@ function freeipa_cdp_nsm ()
     fi
 }
 
+# Function: freeipa_checkports - Validates Expected Open Ports {{{1
+#-----------------------------------------------------------------------
 function freeipa_checkports ()
 {
     echo -e "\n${YELLOW}[02|01] FreeIPA Listenig Ports${NC}\n"
@@ -177,6 +259,8 @@ function freeipa_checkports ()
     fi
 }
 
+# Function: freeipa_health_agent - Validates the FreeIPA Health Agent Service {{{1
+#-----------------------------------------------------------------------
 function freeipa_health_agent ()
 {
     AGENT_API_CALL=$(curl -s --insecure https://localhost:5080 | jq '.checks[].status' | sed 's/\"//g' | sort -u)
@@ -190,9 +274,10 @@ function freeipa_health_agent ()
     fi
 }
 
+# Function: freeipa_create_remote_scripts - Create a copy scripts to be executed using salt {{{1
+#-----------------------------------------------------------------------
 function freeipa_create_remote_scripts ()
 {
-# Scripts to execute remotely using salt in all FreeIPA nodes
 cat > /home/cloudbreak/freeipa_disk_precheck.sh <<EOF
 #!/usr/bin/env bash
 # Disk used under 50%
@@ -559,6 +644,8 @@ main_report
 EOF
 }
 
+# Function: freeipa_forward_dns - Get FreeIPA hostname resolved using salt {{{1
+#-----------------------------------------------------------------------
 function freeipa_forward_dns ()
 {
     salt '*' cmd.run '
@@ -572,6 +659,8 @@ function freeipa_forward_dns ()
     ' 2>/dev/null
 }
 
+# Function: freeipa_reverse_dns - Get FreeIPA IP resolved using salt {{{1
+#-----------------------------------------------------------------------
 function freeipa_reverse_dns ()
 {
     salt '*' cmd.run '
@@ -585,6 +674,8 @@ function freeipa_reverse_dns ()
     ' 2>/dev/null
 }
 
+# Function: freeipa_check_nginx - Validate md5sum for nginx config file {{{1
+#-----------------------------------------------------------------------
 function freeipa_check_nginx ()
 {
     NGINX_FILE_STATE=$(salt '*' cmd.run 'md5sum /etc/nginx/nginx.conf' 2>/dev/null | awk '/nginx/ {print $1}' | sort -u | wc -l)
@@ -598,6 +689,8 @@ function freeipa_check_nginx ()
     fi
 }
 
+# Function: freeipa_test_backup - Test FreeIPA backup is able to read/write in the cloud storage location {{{1
+#-----------------------------------------------------------------------
 function freeipa_test_backup ()
 {
     BACKUP_EXECUTED=$(ls  $(awk -F "[=|\"]" '/\[backup_path\]=/ {print $(NF -1)}' /usr/local/bin/freeipa_backup) | wc -l)
@@ -621,6 +714,8 @@ function freeipa_test_backup ()
     fi
 }
 
+# Function: freeipa_cipa_state - Check consistency across FreeIPA servers {{{1
+#-----------------------------------------------------------------------
 function freeipa_cipa_state ()
 {
     CIPA_STATUS=$( /usr/local/bin/cipa -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password') | sed -ne '3,$p' | awk '/[^\+-]/ {print $(NF -1)}' | sort -u | grep -v '|$' | wc -l)
@@ -633,21 +728,29 @@ function freeipa_cipa_state ()
     fi
 }
 
+# Function: freeipa_create_ldap_conflict_file - Create a file with LDAP conflicts {{{1
+#-----------------------------------------------------------------------
 function freeipa_create_ldap_conflict_file ()
 {
     ldapsearch -H ldap://${LDAP_SRV} -o ldif-wrap=no -D "${BIND_DN}" -w ${PW} "(&(objectClass=ldapSubEntry)(nsds5ReplConflict=*))" \* nsds5ReplConflict > ${LDAP_CONFLICTS_FILE} 2>/dev/null
 }
 
+# Function: freeipa_get_user_group_in_conflicts - Get User/Groups LDAP conflicts {{{1
+#-----------------------------------------------------------------------
 function freeipa_get_user_group_in_conflicts ()
 {
     ldapsearch -H ldap://${LDAP_SRV} -o ldif-wrap=no -D "${BIND_DN}" -w ${PW} "(&(objectClass=ldapSubEntry)(nsds5ReplConflict=*))" \* nsds5ReplConflict | awk -F '[ |=|,]' '/nsds5ReplConflict.*cn=users/ || /nsds5ReplConflict.*cn=groups/ {print $5}' | sort -u
 }
 
+# Function: freeipa_get_idns_in_conflicts - Get hosts LDAP conflicts {{{1
+#-----------------------------------------------------------------------
 function freeipa_get_idns_in_conflicts ()
 {
     ldapsearch -H ldap://${LDAP_SRV} -o ldif-wrap=no -D "${BIND_DN}" -w ${PW} "(&(objectClass=ldapSubEntry)(nsds5ReplConflict=*))" \* nsds5ReplConflict | awk -F '[ |=|,]' '/nsds5ReplConflict.*idnsName=/ {print $5}' | sort -u
 }
 
+# Function: freeipa_ldap_conflicts_check - Check and report if there are LDAP conflicts {{{1
+#-----------------------------------------------------------------------
 function freeipa_ldap_conflicts_check ()
 {
     LDAP_CONFLICTS_CHECK=$(/usr/local/bin/cipa -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password') | awk '/LDAP Conflicts/ {print $5,$7,$9}' | grep 0 >/dev/null 2>&1 && echo $?)
@@ -668,6 +771,8 @@ function freeipa_ldap_conflicts_check ()
     fi
 }
 
+# Function: freeipa_replication_agreements - Check FreeIPA Replication Agreements {{{1
+#-----------------------------------------------------------------------
 function freeipa_replication_agreements ()
 {
     # Status of replication between IPA servers
@@ -687,6 +792,8 @@ function freeipa_replication_agreements ()
     fi
 }
 
+# Function: freeipa_check_saltuser_password_rotation - Validate Salt User Valid Password {{{1
+#-----------------------------------------------------------------------
 function freeipa_check_saltuser_password_rotation ()
 {
     set -- $(salt '*' cmd.run "chage -l saltuser | awk -F":" '/Password expires/ {print \$NF}'"  2>/dev/null |  grep -v 'cloudera\.site' | sort -u)
@@ -711,6 +818,8 @@ function freeipa_check_saltuser_password_rotation ()
     done
 }
 
+# Function: freeipa_is_ccm_enabled - Check if CCM is enabled {{{1
+#-----------------------------------------------------------------------
 function freeipa_is_ccm_enabled ()
 {
     if ! cdp-doctor ccm status >/dev/null 2>&1
@@ -721,6 +830,8 @@ function freeipa_is_ccm_enabled ()
     fi
 }
 
+# Function: freeipa_ccm_network_status - Double-check Control Plane Endpoint access {{{1
+#-----------------------------------------------------------------------
 function freeipa_ccm_network_status ()
 {
     freeipa_is_ccm_enabled
@@ -746,6 +857,8 @@ function freeipa_ccm_network_status ()
     fi
 }
 
+# Function: freeipa_ccm - Double-check CCM is working {{{1
+#-----------------------------------------------------------------------
 function freeipa_ccm ()
 {
     freeipa_is_ccm_enabled
@@ -764,6 +877,8 @@ function freeipa_ccm ()
     fi
 }
 
+# Function: menu_ppal - Show the Principal Menu {{{1
+#-----------------------------------------------------------------------
 function menu_ppal ()
 {
     PS3="Please select an option [-> For Menu Press Enter]: "
@@ -800,27 +915,8 @@ function menu_ppal ()
     done
 }
 
-function main ()
-{
-    echo -e "\n===> ${BLUE}Preparing the Environment${NC} <===\n"
-    do_spin &
-    SPIN_PID=$!
-    do_enable_minion2master_copy
-    freeipa_create_remote_scripts
-    # Get the list of ipa nodes
-    set -- $(salt-key --out json 2>/dev/null | jq -r '.minions[]' | egrep 'ipa')
-    for FILES_TO_COPY in ${FILES2COPY}
-    do
-        # Copy the scripts to IPA nodes
-        salt-cp --chunked --list "$(echo $@ | sed 's| |,|g')" /home/cloudbreak/${FILES_TO_COPY} /tmp/${FILES_TO_COPY} >/dev/null 2>&1
-    done
-    kill -9 $SPIN_PID 2>/dev/null
-    wait $SPIN_PID >/dev/null 2>&1
-
-    clear
-    menu_ppal
-}
-
+# Function: menu_ppal - Run local Healt Check {{{1
+#-----------------------------------------------------------------------
 function main_health_check ()
 {
     echo -e "\n===> ${BLUE}FreeIPA Health Checks${NC} <===\n"
@@ -938,21 +1034,29 @@ function main_health_check ()
     freeipa_ccm
 }
 
-# Need to run the script as the root user
-if [[ $(id -u) -ne 0 ]]
-then
-    echo -e 'You are not the -->> ${RED}root${NC} <<-- user. Please execute: >> ${GREEN}sudo -i${NC} << then execute ${GREEN}${0}${NC} again'
-    exit 1
-fi
+# Function: main - Run the required functions {{{1
+#-----------------------------------------------------------------------
+function main ()
+{
+    echo -e "\n===> ${BLUE}Preparing the Environment${NC} <===\n"
+    do_spin &
+    SPIN_PID=$!
+    do_enable_minion2master_copy
+    freeipa_create_remote_scripts
+    # Get the list of ipa nodes
+    set -- $(salt-key --out json 2>/dev/null | jq -r '.minions[]' | egrep 'ipa')
+    for FILES_TO_COPY in ${FILES2COPY}
+    do
+        # Copy the scripts to IPA nodes
+        salt-cp --chunked --list "$(echo $@ | sed 's| |,|g')" /home/cloudbreak/${FILES_TO_COPY} /tmp/${FILES_TO_COPY} >/dev/null 2>&1
+    done
+    kill -9 $SPIN_PID 2>/dev/null
+    wait $SPIN_PID >/dev/null 2>&1
 
-# No arguments allowed
-if [ $# -gt 0 ] ; then
-  echo "Invalid Syntax!"
-  echo "The valid syntax is ./$(basename $0)"
-  exit 1
-fi
+    clear
+    menu_ppal
+}
 
-clear
 # Color Codes:
 # ===========
 # Black        0;30     Dark Gray     1;30
@@ -970,6 +1074,21 @@ export YELLOW='\033[0;33m'
 export BLUE='\033[0;34m'
 export NC='\033[0m' # No Color
 
+# Need to run the script as the root user
+if [[ $(id -u) -ne 0 ]]
+then
+    echo -e "You are not the -->> ${RED}root${NC} <<-- user. Please execute: >> ${GREEN}sudo -i${NC} << then execute ${GREEN}$0${NC} again"
+    exit 1
+fi
+
+# No arguments allowed
+if [[ $# -gt 0 ]] ; then
+  echo -e "Invalid Syntax!"
+  echo -e "The valid syntax is  ${GREEN}./$(basename $0)${NC}"
+  exit 2
+fi
+
+clear
 source activate_salt_env
 # This is required for option 1 "Health Check locally"
 export LDAP_CONFLICTS_FILE=/tmp/LDAP_CONFLICTS.txt
