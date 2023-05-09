@@ -877,6 +877,95 @@ function freeipa_ccm ()
     fi
 }
 
+# Function: freeipa_md5sum_groups - Double-check if all FreeIPA nodes have the same group list {{{1
+#-----------------------------------------------------------------------
+function freeipa_md5sum_groups ()
+{
+salt '*' cmd.run '
+    #!/bin/bash
+    PRINCIPAL=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.admin_user') 
+    PW=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
+    echo ${PW} | kinit ${PRINCIPAL} >/dev/null 2>&1
+    ipa group-find --all | grep 'dn:' | md5sum
+' 2>/dev/null
+}
+
+# Function: freeipa_md5sum_users - Double-check if all FreeIPA nodes have the same user list {{{1
+#-----------------------------------------------------------------------
+function freeipa_md5sum_users ()
+{
+salt '*' cmd.run '
+    #!/bin/bash
+    PRINCIPAL=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.admin_user') 
+    PW=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
+    echo ${PW} | kinit ${PRINCIPAL} >/dev/null 2>&1
+    ipa group-find --all | grep 'dn:' | md5sum
+' 2>/dev/null
+}
+
+# Function: freeipa_duplicated_forward_dns_entries - Query DNS for duplicated A Records {{{1
+#-----------------------------------------------------------------------
+function freeipa_duplicated_forward_dns_entries ()
+{
+    set -- $(ipa server-find --pkey-only  |  awk -F "[:]" '/Server/ {print "host -t A"$NF}' | bash | awk '{print $NF}')
+    FREEIPA_DOMAIN=$(salt-call pillar.get freeipa:domain --out=json 2>/dev/null | jq -r '.local')
+    for DNS_FORWARD_ZONE in $(ipa dnszone-find | awk -F":" '/Zone/ &&  $0 !~ /arpa/ {print $2}' | sed 's/ //g')
+    do
+        for A_RECORD in $(ipa dnsrecord-find ${DNS_FORWARD_ZONE} | awk -F ":" '/Record.*[0-9]+/ || /Record.*ipa\-/ || /Record.*ipaserver/ || /A record/' | awk -F ":" '/Record.*name/ {print $NF}' | sed 's/ //g')
+        do
+            if [[ ${A_RECORD} == ipa-ca ]]
+            then
+                #ipa-ca should respond to the same ipa server records
+                if [[ $(host -t A ipa-ca | wc -l) == $(ipa server-find --pkey-only  |  awk -F "[:]" '/Server/ {print "host -t A"$NF}' | bash | awk '{print $NF}' | wc -l) ]]
+                then
+                    echo -e "${A_RECORD}.${FREEIPA_DOMAIN} [${GREEN}PASS${NC}]"
+                else
+                    echo -e "${A_RECORD}.${FREEIPA_DOMAIN} [${RED}FAILED${NC}]"
+                fi
+            else
+                # Needs to report only one entry
+                # host -t A ${A_RECORD}
+                if [[ $(host -t A ${A_RECORD} | grep 'has address' | wc -l) -eq 1 ]]
+                then
+                    echo -e "${A_RECORD}.${FREEIPA_DOMAIN} [${GREEN}PASS${NC}]"
+                else
+                    echo -e "${A_RECORD}.${FREEIPA_DOMAIN} [${RED}FAILED${NC}]"
+                fi
+            fi
+        done
+    done  
+}
+
+# Function: freeipa_duplicated_reverse_dns_entries - Query DNS for duplicated PTR Records {{{1
+#-----------------------------------------------------------------------
+function freeipa_duplicated_reverse_dns_entries ()
+{
+    T_STAMP=$(date +"%Y%m%d%H%M%S")
+    for DNS_REVERSE_ZONE in $(ipa dnszone-find | awk -F":" '/Zone/ &&  /arpa/ {print $2}' | sed 's/ //g')
+    do
+        echo -e "\n${DNS_REVERSE_ZONE}\n"
+        ipa dnsrecord-find ${DNS_REVERSE_ZONE} | awk -F ":" '/Record.*[0-9]+/ || /PTR record/' | awk -F":" '/PTR record:/ {print $NF}' | sed 's/ //g' > /tmp/dns-${T_STAMP}
+        for PTR_RECORD in $(ipa dnsrecord-find ${DNS_REVERSE_ZONE} | awk -F ":" '/Record.*[0-9]+/ || /PTR record/' | awk -F":" '/PTR record:/ {print $NF}' | sed 's/ //g')
+        do
+            if [[ $(grep -c ${PTR_RECORD} /tmp/dns-${T_STAMP}) -eq 1 ]]
+            then
+                echo -e "${PTR_RECORD} [${GREEN}PASS${NC}]"
+            else
+                echo -e "\n${PTR_RECORD} [${RED}FAILED${NC}]\n"
+                ipa dnsrecord-find ${DNS_REVERSE_ZONE} | grep --color -B1 "${PTR_RECORD}"
+            fi
+        done
+    done
+    rm -rf /tmp/dns-${T_STAMP}
+}
+
+# Function: freeipa_fd_per_proc - Get FD used vs Configured for FreeIPA services {{{1
+#-----------------------------------------------------------------------
+function freeipa_fd_per_proc ()
+{
+
+}
+
 # Function: menu_ppal - Show the Principal Menu {{{1
 #-----------------------------------------------------------------------
 function menu_ppal ()
