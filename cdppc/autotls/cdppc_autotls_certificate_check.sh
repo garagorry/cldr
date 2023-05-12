@@ -25,13 +25,24 @@ function run_as_root_check ()
     fi
 }
 
-# Function: do_check_ssl_certificates - Get the SSL certificate Chain {{{1
+# Function: do_check_open_port - Validate if the TCP port is open {{{1
 #-----------------------------------------------------------------------
-function do_check_ssl_certificates () 
+function do_check_open_port () {
+    timeout 2 bash -c "nc -z ${HOST_FQDN} ${HOST_SSL_PORT} >/dev/null 2>&1"
+    if [[ $? -ne 0 ]]
+    then
+        echo -e "\nThe connection to ==> ${RED}${HOST_FQDN}:${HOST_SSL_PORT}${NC} <== is not possible, the port is Closed\n"
+        exit 1
+    fi
+}
+
+# Function: do_check_arguments_required - Validate if required arguments are used {{{1
+#-----------------------------------------------------------------------
+function do_check_arguments_required () 
 {
     if [[ $# -ne 3 ]]
     then
-        echo "USAGE: $0 'RUNS FQDN PORT'"
+        echo -e "${RED}USAGE:${NC} $0 'RUNS FQDN PORT'\n"
         exit 1
     else
         export RUNS=$1
@@ -39,33 +50,67 @@ function do_check_ssl_certificates ()
         export HOST_SSL_PORT=$3
         export BASE_DIR=/tmp/cldr_ssl_$(date +"%Y%m%d%H%M%S")
     fi
-    COUNT=1
-    while (( COUNT <= RUNS ))
+}
+
+# Function: do_spin - Create the spinner for long running processes {{{1
+#-----------------------------------------------------------------------
+function do_spin ()
+{
+    spinner="/|\\-/|\\-"
+    while :
     do
-        mkdir ${BASE_DIR}_${HOST_FQDN}_${COUNT}
-        cd ${BASE_DIR}_${HOST_FQDN}_${COUNT}
-        echo "...[${COUNT}/${RUNS}]..."
-        openssl s_client -connect ${HOST_FQDN}:${HOST_SSL_PORT}  -showcerts </dev/null 2>/dev/null | awk '/BEGIN/,/END/{ if(/BEGIN/){a++}; out="cert"a".crt"; print >out}'
-        for cert in *.crt
+        for i in $(seq 0 7)
         do
-            newname=$(openssl x509 -noout -subject -in $cert | sed -n 's/^.*CN=\(.*\)$/\1/; s/[ ,.*]/_/g; s/__/_/g; s/^_//g;p').pem
-            if [[ -f ${newname} ]]
-            then
-                mv ${cert} ${newname}_1
-            else
-                mv ${cert} ${newname}
-            fi
+            echo -n "${spinner:$i:1}"
+            echo -en "\010"
+            sleep 1
         done
-        for i in *.pem*
-        do
-            echo -e "\n${YELLOW}${i}:${NC}\n"
-            #openssl x509 -noout -subject -issuer -dates -inform PEM -in ${i}
-            openssl x509 -noout -subject -issuer -dates -inform PEM -text -certopt no_subject,no_header,no_version,no_serial,no_signame,no_validity,no_issuer,no_pubkey,no_sigdump,no_aux -in ${i}
-            echo
-        done
-        sleep 5
-        (( COUNT += 1 ))
     done
+}
+
+# Function: do_check_ssl_certificates - Get the SSL certificate Chain {{{1
+#-----------------------------------------------------------------------
+function do_check_ssl_certificates () 
+{
+    openssl s_client -connect ${HOST_FQDN}:${HOST_SSL_PORT} -brief </dev/null >/dev/null 2>&1
+    if [[ $? -ne 0 ]]
+    then
+        echo -e "\nThe connection to ==> ${RED}${HOST_FQDN}:${HOST_SSL_PORT}${NC} <== is not SSL Enabled\n"
+        exit 1
+    else
+        COUNT=1
+        while (( COUNT <= RUNS ))
+        do
+            mkdir ${BASE_DIR}_${HOST_FQDN}_${COUNT}
+            cd ${BASE_DIR}_${HOST_FQDN}_${COUNT}
+            echo "...[${COUNT}/${RUNS}]..."
+            openssl s_client -connect ${HOST_FQDN}:${HOST_SSL_PORT}  -showcerts </dev/null 2>/dev/null | awk '/BEGIN/,/END/{ if(/BEGIN/){a++}; out="cert"a".crt"; print >out}'
+            for cert in *.crt
+            do
+                newname=$(openssl x509 -noout -subject -in $cert | sed -n 's/^.*CN=\(.*\)$/\1/; s/[ ,.*]/_/g; s/__/_/g; s/^_//g;p').pem
+                if [[ -f ${newname} ]]
+                then
+                    mv ${cert} ${newname}_1
+                else
+                    mv ${cert} ${newname}
+                fi
+            done
+            for i in *.pem*
+            do
+                echo -e "\n${YELLOW}${i}:${NC}\n"
+                #openssl x509 -noout -subject -issuer -dates -inform PEM -in ${i}
+                openssl x509 -noout -subject -issuer -dates -inform PEM -text -certopt no_subject,no_header,no_version,no_serial,no_signame,no_validity,no_issuer,no_pubkey,no_sigdump,no_aux -in ${i}
+                echo
+            done
+            echo -e "\n... Waiting 5 seconds between every run ...\n"
+            do_spin &
+            SPIN_PID=$!    
+            sleep 5
+            kill -9 $SPIN_PID 2>/dev/null
+            wait $SPIN_PID >/dev/null 2>&1
+            (( COUNT += 1 ))
+        done
+    fi
 }
 
 # Function: main - Call the actions {{{1
@@ -90,7 +135,9 @@ function main ()
     export NC='\033[0m' # No Color
 
     run_as_root_check
-    do_check_ssl_certificates $1 $2 $3    
+    do_check_arguments_required $1 $2 $3   
+    do_check_open_port $1 $2 $3  
+    do_check_ssl_certificates  
 }
 
 main $1 $2 $3 
