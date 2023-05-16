@@ -175,7 +175,8 @@ function do_datalake_status ()
         echo -e "\n${YELLOW}==> Data Lake:${NC} $(cdp --profile ${PROFILE} datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.[] | "\(.datalakeName) | SHAPE => \(.shape) | STATUS => \(.status)"')"
         export DATALAKE_CRN=$(cdp --profile ${PROFILE}  datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.datalake.crn')
         echo ${DATALAKE_CRN}
-        if [[ $(cdp --profile ${PROFILE}  datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.[].status') != "STOPPED" ]]
+        DATALAKE_STATE="$(cdp --profile ${PROFILE}  datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.[].status')"
+        if [[ ${DATALAKE_STATE} != "STOPPED" ]] && [[ ${DATALAKE_STATE} != "PROVISIONING_FAILED" ]]
         then
             echo -e "${YELLOW}\nCluster service status${NC}\n"
             cdp --profile ${PROFILE} datalake get-cluster-service-status --cluster-name ${DATALAKE_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY => \(.healthSummary)"'
