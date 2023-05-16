@@ -32,6 +32,7 @@ function do_check_cdp_installed ()
         echo -e "\n${RED}Something went wrong${NC}"
         echo -e "Please review your CDP Client Installation."
         echo -e "CLI client setup at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html${NC}\n"
+        echo -e "CDP Control Plane regions at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/requirements-aws/topics/cdp-control-plane-regions.html${NC}\n"
         cat <<EOF
 ##############################################################################
 CDP CLI | Example of a CDP CLI installation using Python's Virtual Environment
@@ -99,6 +100,7 @@ function do_get_cdp_valid_profile ()
             echo -e "\n${RED}Something went wrong with ${NC}<< ${PROFILE} >>${RED} profile. Please confirm if this is a valid CDP Profile${NC}"
             echo -e "Please review your CDP Client configurations << \$HOME/.cdp/credentials >>\n${RED}$(grep --color '^\[.*\]$' ~/.cdp/credentials)${NC}"
             echo -e "CLI client setup at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html${NC}\n"
+            echo -e "CDP Control Plane regions at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/requirements-aws/topics/cdp-control-plane-regions.html${NC}\n"
             
             kill -9 $SPIN_PID 2>/dev/null
             wait $SPIN_PID >/dev/null 2>&1
@@ -113,6 +115,7 @@ function do_get_cdp_valid_profile ()
             echo -e "\n${RED}Something went wrong with ${NC}<< default >>${RED} profile. Please confirm if this is a valid CDP Profile${NC}"
             echo -e "Please review your CDP Client configurations << \$HOME/.cdp/credentials >>\n${RED}$(grep --color '^\[.*\]$' ~/.cdp/credentials)${NC}"
             echo -e "CLI client setup at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html${NC}\n"
+            echo -e "CDP Control Plane regions at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/requirements-aws/topics/cdp-control-plane-regions.html${NC}\n"
 
             kill -9 $SPIN_PID 2>/dev/null
             wait $SPIN_PID >/dev/null 2>&1
