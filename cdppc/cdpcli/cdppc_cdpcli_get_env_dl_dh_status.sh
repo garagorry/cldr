@@ -22,12 +22,31 @@ function do_check_arguments_required ()
     fi
 }
 
+# Function: do_spin - Create the spinner for long running processes {{{1
+#-----------------------------------------------------------------------
+function do_spin ()
+{
+    spinner="/|\\-/|\\-"
+    while :
+    do
+        for i in $(seq 0 7)
+        do
+            echo -n "${spinner:$i:1}"
+            echo -en "\010"
+            sleep 1
+        done
+    done
+}
+
 # Function: do_get_cdp_valid_profile - Get a valid CDP Profile to query the Control Plane {{{1
 #-----------------------------------------------------------------------
 function do_get_cdp_valid_profile ()
 {
     echo -en "\n${YELLOW}Give me the CDP Proifle to use [Press Enter to use Default]: ${NC}"
     read CDP_PROFILE_ANSWER
+
+    do_spin &
+    SPIN_PID=$!
 
     if [[ -z ${CDP_PROFILE_ANSWER} ]]
     then
@@ -55,6 +74,9 @@ function do_get_cdp_valid_profile ()
             exit 1
         fi
     fi
+
+    kill -9 $SPIN_PID 2>/dev/null
+    wait $SPIN_PID >/dev/null 2>&1
 }
 
 # Function: do_env_freeipa_status - Get the Environment/FreeIPA status  {{{1
@@ -66,14 +88,18 @@ function do_env_freeipa_status ()
     echo -e "\n###################################################################################################"
     echo -e "   ENVIRONMENT & FREEIPA STATUS"
     echo -e "###################################################################################################" 
+    
+    do_spin &
+    SPIN_PID=$!
 
     ENVIRONMENT_NAME=$1
     PROFILE=${CDP_PROFILE_ANSWER}
 
     cdp --profile ${PROFILE} environments describe-environment --environment-name ${ENVIRONMENT_NAME} >/dev/null 2>&1
+
     if [[ $? -ne 0 ]]
     then
-        echo -e "\n${RED}Something went wrong. Please confirm${NC}<< ${ENVIRONMENT_NAME} >>${RED}is a valid Environment Name${NC}\n"
+        echo -e "\n${RED}Something went wrong. Please confirm${NC} << ${ENVIRONMENT_NAME} >>${RED} is a valid Environment Name${NC}\n"
         exit 1
     else
         echo -e "\n${RED}==> Environment:${NC} $(cdp --profile ${PROFILE} environments describe-environment --environment-name ${ENVIRONMENT_NAME} 2>/dev/null | jq -r '.[] | "\(.environmentName) | STATUS => \(.status) | CLOUD PLATFORM => \(.cloudPlatform)"')"
@@ -82,6 +108,9 @@ function do_env_freeipa_status ()
         echo -e "\n${YELLOW}FreeIPA${NC}\n"
         cdp --profile ${PROFILE} environments get-freeipa-status --environment-name  ${ENVIRONMENT_NAME} 2>/dev/null | jq -r '.'
     fi
+    
+    kill -9 $SPIN_PID 2>/dev/null
+    wait $SPIN_PID >/dev/null 2>&1
 }
 
 # Function: do_datalake_status - Get the Data Lake status  {{{1
@@ -91,6 +120,10 @@ function do_datalake_status ()
     echo -e "\n###################################################################################################"
     echo -e "   DATALAKE STATUS"
     echo -e "###################################################################################################" 
+    
+    do_spin &
+    SPIN_PID=$!
+    
     if [[ $(echo "cdp --profile ${PROFILE} datalake list-datalakes 2>/dev/null | jq -r '.datalakes[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.datalakeName)\"'" | bash | wc -l) -ne 0 ]]
     then
         DATALAKE_NAME=$(echo "cdp --profile ${PROFILE} datalake list-datalakes 2>/dev/null | jq -r '.datalakes[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.datalakeName)\"'" | bash)
@@ -107,6 +140,9 @@ function do_datalake_status ()
     else
         echo -e "\n${YELLOW}No Data Lake on this Environment${NC}\n"
     fi
+
+    kill -9 $SPIN_PID 2>/dev/null
+    wait $SPIN_PID >/dev/null 2>&1
 }
 
 # Function: do_datahub_status - Get the Datahub status per Env  {{{1
@@ -116,6 +152,10 @@ function do_datahub_status ()
     echo -e "\n###################################################################################################"
     echo -e "   DATAHUB STATUS"
     echo -e "###################################################################################################" 
+        
+    do_spin &
+    SPIN_PID=$!
+    
     if [[ $(echo "cdp --profile ${PROFILE} datahub list-clusters 2>/dev/null | jq -r '.clusters[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.clusterName)\"'" | bash | wc -l) -ne 0 ]]
     then
         for DATAHUB_NAME in $(echo "cdp --profile ${PROFILE} datahub list-clusters 2>/dev/null | jq -r '.clusters[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.clusterName)\"'" | bash)
@@ -135,6 +175,9 @@ function do_datahub_status ()
     else
         echo -e "\n${YELLOW}No Datahubs on this Environment${NC}\n"
     fi
+
+    kill -9 $SPIN_PID 2>/dev/null
+    wait $SPIN_PID >/dev/null 2>&1
 }
 
 # Function: main - Run the required functions {{{1
