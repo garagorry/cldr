@@ -22,6 +22,45 @@ function do_check_arguments_required ()
     fi
 }
 
+# Function: do_check_cdp_installed - Validate if cdp cli is installed {{{1
+#-----------------------------------------------------------------------
+function do_check_cdp_installed () 
+{
+    cdp >/dev/null 2>&1
+    if [[ $? -ne 0 ]]
+    then
+        echo -e "\n${RED}Something went wrong${NC}"
+        echo -e "Please review your CDP Client Installation."
+        echo -e "CLI client setup at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html${NC}\n"
+        cat <<EOF
+##############################################################################
+CDP CLI | Example of a CDP CLI installation using Python's Virtual Environment
+##############################################################################
+
+mkdir -p ~/cdpcli/{cdpcli-beta,cdpclienv}
+
+=========================
+# Public CDP CLI client #
+=========================
+virtualenv ~/cdpcli/cdpclienv
+source ~/cdpcli/cdpclienv/bin/activate
+pip install cdpcli
+pip install --upgrade cdpcli
+deactivate
+
+================
+# Beta CDP CLI #
+================
+virtualenv ~/cdpcli/cdpcli-beta
+source ~/cdpcli/cdpcli-beta/bin/activate
+pip3 install cdpcli-beta
+pip3 install cdpcli-beta --upgrade
+EOF
+        echo
+        exit 1
+    fi
+}
+
 # Function: do_spin - Create the spinner for long running processes {{{1
 #-----------------------------------------------------------------------
 function do_spin ()
@@ -58,8 +97,11 @@ function do_get_cdp_valid_profile ()
             echo -e "\nUsing CDP CLI with ${GREEN}<< ${CDP_PROFILE_ANSWER} >>${NC} profile"
         else
             echo -e "\n${RED}Something went wrong with ${NC}<< ${PROFILE} >>${RED} profile. Please confirm if this is a valid CDP Profile${NC}"
-            echo -e "Please review you CDP Client configurations << \$HOME/.cdp/credentials >>\n${RED}$(grep --color '^\[.*\]$' ~/.cdp/credentials)${NC}"
+            echo -e "Please review your CDP Client configurations << \$HOME/.cdp/credentials >>\n${RED}$(grep --color '^\[.*\]$' ~/.cdp/credentials)${NC}"
             echo -e "CLI client setup at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html${NC}\n"
+            
+            kill -9 $SPIN_PID 2>/dev/null
+            wait $SPIN_PID >/dev/null 2>&1
             exit 1
         fi
     else
@@ -69,8 +111,11 @@ function do_get_cdp_valid_profile ()
             echo -e "\nUsing CDP CLI with ${GREEN}<< ${CDP_PROFILE_ANSWER} >>${NC} profile"
         else
             echo -e "\n${RED}Something went wrong with ${NC}<< default >>${RED} profile. Please confirm if this is a valid CDP Profile${NC}"
-            echo -e "Please review you CDP Client configurations << \$HOME/.cdp/credentials >>\n${RED}$(grep --color '^\[.*\]$' ~/.cdp/credentials)${NC}"
+            echo -e "Please review your CDP Client configurations << \$HOME/.cdp/credentials >>\n${RED}$(grep --color '^\[.*\]$' ~/.cdp/credentials)${NC}"
             echo -e "CLI client setup at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html${NC}\n"
+
+            kill -9 $SPIN_PID 2>/dev/null
+            wait $SPIN_PID >/dev/null 2>&1
             exit 1
         fi
     fi
@@ -200,8 +245,9 @@ function main ()
     export YELLOW='\033[1;33m'
     export BLUE='\033[0;34m'
     export NC='\033[0m' # No Color
-    do_check_arguments_required $1   
-    do_env_freeipa_status $1 
+    do_check_arguments_required $1
+    do_check_cdp_installed
+    do_env_freeipa_status $1
     do_datalake_status
     do_datahub_status
 }
