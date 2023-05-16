@@ -42,7 +42,7 @@ function do_spin ()
 #-----------------------------------------------------------------------
 function do_get_cdp_valid_profile ()
 {
-    echo -en "\n${YELLOW}Give me the CDP Proifle to use [Press Enter to use Default]: ${NC}"
+    echo -en "\n${YELLOW}Give me the CDP Profile to use [Press Enter to use Default]: ${NC}"
     read CDP_PROFILE_ANSWER
 
     do_spin &
