@@ -97,10 +97,13 @@ function do_datalake_status ()
         echo -e "\n${YELLOW}==> Data Lake:${NC} $(cdp --profile ${PROFILE} datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.[] | "\(.datalakeName) | SHAPE => \(.shape) | STATUS => \(.status)"')"
         export DATALAKE_CRN=$(cdp --profile ${PROFILE}  datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.datalake.crn')
         echo ${DATALAKE_CRN}
-        echo -e "${YELLOW}\nCluster service status${NC}\n"
-        cdp --profile ${PROFILE} datalake get-cluster-service-status --cluster-name ${DATALAKE_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY => \(.healthSummary)"'
-        echo -e "\n${YELLOW}Hosts status${NC}\n"
-        cdp --profile ${PROFILE} datalake get-cluster-host-status --cluster-name ${DATALAKE_NAME} | jq -r '.hosts[] | "\(.hostname) | HEALTH SUMMARY => \(.healthSummary)"'
+        if [[ $(cdp --profile ${PROFILE}  datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.[].status') != "STOPPED" ]]
+        then
+            echo -e "${YELLOW}\nCluster service status${NC}\n"
+            cdp --profile ${PROFILE} datalake get-cluster-service-status --cluster-name ${DATALAKE_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY => \(.healthSummary)"'
+            echo -e "\n${YELLOW}Hosts status${NC}\n"
+            cdp --profile ${PROFILE} datalake get-cluster-host-status --cluster-name ${DATALAKE_NAME} | jq -r '.hosts[] | "\(.hostname) | HEALTH SUMMARY => \(.healthSummary)"'
+        fi
     else
         echo -e "\n${YELLOW}No Data Lake on this Environment${NC}\n"
     fi
