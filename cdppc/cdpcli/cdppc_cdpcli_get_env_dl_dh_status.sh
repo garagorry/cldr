@@ -2,6 +2,8 @@
 #
 # Description: Script to get the status of an Environment, associated DL and DHs.
 #              
+# Use Case: (CDPPC) Execute before running a FreeIPA Upgrade. 
+#              
 # Date       Author               Description
 # ---------- ------------------- ---------------------------------------------------------
 # 05/15/2023 Jimmy Garagorry      Created
@@ -29,13 +31,14 @@ function do_get_cdp_valid_profile ()
 
     if [[ -z ${CDP_PROFILE_ANSWER} ]]
     then
-        echo -e "\nUsing CDP CLI with ${GREEN}<< default >>${NC} profile"
-        cdp --profile default iam get-user > /dev/null 2>&1
+        export CDP_PROFILE_ANSWER=default
+        #echo -e "\nUsing CDP CLI with ${GREEN}<< ${CDP_PROFILE_ANSWER} >>${NC} profile"
+        cdp --profile ${CDP_PROFILE_ANSWER} iam get-user > /dev/null 2>&1
         if [[ $? -eq 0 ]]
         then
             echo -e "\nUsing CDP CLI with ${GREEN}<< ${CDP_PROFILE_ANSWER} >>${NC} profile"
         else
-            echo -e "\n${RED}Something went wrong with ${NC}<< default >>${RED} profile. Please confirm if this is a valid CDP Profile${NC}"
+            echo -e "\n${RED}Something went wrong with ${NC}<< ${PROFILE} >>${RED} profile. Please confirm if this is a valid CDP Profile${NC}"
             echo -e "Please review you CDP Client configurations << \$HOME/.cdp/credentials >>\n${RED}$(grep --color '^\[.*\]$' ~/.cdp/credentials)${NC}"
             echo -e "CLI client setup at: ${BLUE}https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html${NC}\n"
             exit 1
@@ -96,8 +99,6 @@ function do_datalake_status ()
     cdp --profile ${PROFILE} datalake get-cluster-service-status --cluster-name ${DATALAKE_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY => \(.healthSummary)"'
     echo -e "\n${YELLOW}Hosts status${NC}\n"
     cdp --profile ${PROFILE} datalake get-cluster-host-status --cluster-name ${DATALAKE_NAME} | jq -r '.hosts[] | "\(.hostname) | HEALTH SUMMARY => \(.healthSummary)"'
-    
-
 }
 
 # Function: do_datahub_status - Get the Datahub status per Env  {{{1
