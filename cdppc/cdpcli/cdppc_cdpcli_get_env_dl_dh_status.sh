@@ -91,14 +91,19 @@ function do_datalake_status ()
     echo -e "\n###################################################################################################"
     echo -e "   DATALAKE STATUS"
     echo -e "###################################################################################################" 
-    DATALAKE_NAME=$(echo "cdp --profile ${PROFILE} datalake list-datalakes 2>/dev/null | jq -r '.datalakes[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.datalakeName)\"'" | bash)
-    echo -e "\n${YELLOW}==> Data Lake:${NC} $(cdp --profile ${PROFILE} datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.[] | "\(.datalakeName) | SHAPE => \(.shape) | STATUS => \(.status)"')"
-    export DATALAKE_CRN=$(cdp --profile ${PROFILE}  datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.datalake.crn')
-    echo ${DATALAKE_CRN}
-    echo -e "${YELLOW}\nCluster service status${NC}\n"
-    cdp --profile ${PROFILE} datalake get-cluster-service-status --cluster-name ${DATALAKE_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY => \(.healthSummary)"'
-    echo -e "\n${YELLOW}Hosts status${NC}\n"
-    cdp --profile ${PROFILE} datalake get-cluster-host-status --cluster-name ${DATALAKE_NAME} | jq -r '.hosts[] | "\(.hostname) | HEALTH SUMMARY => \(.healthSummary)"'
+    if [[ $(echo "cdp --profile ${PROFILE} datalake list-datalakes 2>/dev/null | jq -r '.datalakes[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.datalakeName)\"'" | bash | wc -l) -ne 0 ]]
+    then
+        DATALAKE_NAME=$(echo "cdp --profile ${PROFILE} datalake list-datalakes 2>/dev/null | jq -r '.datalakes[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.datalakeName)\"'" | bash)
+        echo -e "\n${YELLOW}==> Data Lake:${NC} $(cdp --profile ${PROFILE} datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.[] | "\(.datalakeName) | SHAPE => \(.shape) | STATUS => \(.status)"')"
+        export DATALAKE_CRN=$(cdp --profile ${PROFILE}  datalake describe-datalake --datalake-name ${DATALAKE_NAME} 2>/dev/null | jq -r '.datalake.crn')
+        echo ${DATALAKE_CRN}
+        echo -e "${YELLOW}\nCluster service status${NC}\n"
+        cdp --profile ${PROFILE} datalake get-cluster-service-status --cluster-name ${DATALAKE_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY => \(.healthSummary)"'
+        echo -e "\n${YELLOW}Hosts status${NC}\n"
+        cdp --profile ${PROFILE} datalake get-cluster-host-status --cluster-name ${DATALAKE_NAME} | jq -r '.hosts[] | "\(.hostname) | HEALTH SUMMARY => \(.healthSummary)"'
+    else
+        echo -e "\n${YELLOW}No Data Lake on this Environment${NC}\n"
+    fi
 }
 
 # Function: do_datahub_status - Get the Datahub status per Env  {{{1
