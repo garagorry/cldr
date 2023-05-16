@@ -108,7 +108,7 @@ function do_env_freeipa_status ()
         echo -e "\n${YELLOW}FreeIPA${NC}\n"
         cdp --profile ${PROFILE} environments get-freeipa-status --environment-name  ${ENVIRONMENT_NAME} 2>/dev/null | jq -r '.'
     fi
-    
+
     kill -9 $SPIN_PID 2>/dev/null
     wait $SPIN_PID >/dev/null 2>&1
 }
@@ -208,6 +208,3 @@ function main ()
 
 clear
 main $1
-
-# DL is not running or is not created
-# No DHs
