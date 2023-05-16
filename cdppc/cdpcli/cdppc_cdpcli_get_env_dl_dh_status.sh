@@ -108,20 +108,25 @@ function do_datahub_status ()
     echo -e "\n###################################################################################################"
     echo -e "   DATAHUB STATUS"
     echo -e "###################################################################################################" 
-    for DATAHUB_NAME in $(echo "cdp --profile ${PROFILE} datahub list-clusters 2>/dev/null | jq -r '.clusters[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.clusterName)\"'" | bash)
-    do
-        echo -e "\n${BLUE}==> Datahub:${NC} $(cdp --profile ${PROFILE} datahub describe-cluster --cluster-name ${DATAHUB_NAME} 2>/dev/null | jq -r '.[] | "\(.clusterName) | STATUS => \(.status) | CLUSTER STATUS => \(.clusterStatus)"')"
-        DATAHUB_CRN=$(cdp --profile ${PROFILE}  datahub describe-cluster --cluster-name ${DATAHUB_NAME} 2>/dev/null | jq -r '.cluster.crn')
-        echo ${DATAHUB_CRN}
+    if [[ $(echo "cdp --profile ${PROFILE} datahub list-clusters 2>/dev/null | jq -r '.clusters[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.clusterName)\"'" | bash | wc -l) -ne 0 ]]
+    then
+        for DATAHUB_NAME in $(echo "cdp --profile ${PROFILE} datahub list-clusters 2>/dev/null | jq -r '.clusters[] | select (.environmentCrn | contains(\"${ENVIRONMENT_CRN}\")) | \"\(.clusterName)\"'" | bash)
+        do
+            echo -e "\n${BLUE}==> Datahub:${NC} $(cdp --profile ${PROFILE} datahub describe-cluster --cluster-name ${DATAHUB_NAME} 2>/dev/null | jq -r '.[] | "\(.clusterName) | STATUS => \(.status) | CLUSTER STATUS => \(.clusterStatus)"')"
+            DATAHUB_CRN=$(cdp --profile ${PROFILE}  datahub describe-cluster --cluster-name ${DATAHUB_NAME} 2>/dev/null | jq -r '.cluster.crn')
+            echo ${DATAHUB_CRN}
 
-        if [[ $(cdp --profile ${PROFILE} datahub describe-cluster --cluster-name ${DATAHUB_NAME} 2>/dev/null | jq -r '.[].status') != "STOPPED" ]]
-        then
-            echo -e "\n${YELLOW}Cluster service status${NC}\n"
-            cdp --profile ${PROFILE} datahub get-cluster-service-status --cluster-name ${DATAHUB_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY =>  \(.healthSummary)"'
-            echo -e "\n${YELLOW}Hosts status${NC}\n"
-            cdp --profile ${PROFILE} datahub get-cluster-host-status --cluster-name ${DATAHUB_NAME} | jq -r '.hosts[] | "\(.hostname) | HEALTH SUMMARY => \(.healthSummary)"'
-        fi
-    done
+            if [[ $(cdp --profile ${PROFILE} datahub describe-cluster --cluster-name ${DATAHUB_NAME} 2>/dev/null | jq -r '.[].status') != "STOPPED" ]]
+            then
+                echo -e "\n${YELLOW}Cluster service status${NC}\n"
+                cdp --profile ${PROFILE} datahub get-cluster-service-status --cluster-name ${DATAHUB_NAME} | jq -r '.services[] | "SERVICE => \(.type) | STATE => \(.state) | HEALTH SUMMARY =>  \(.healthSummary)"'
+                echo -e "\n${YELLOW}Hosts status${NC}\n"
+                cdp --profile ${PROFILE} datahub get-cluster-host-status --cluster-name ${DATAHUB_NAME} | jq -r '.hosts[] | "\(.hostname) | HEALTH SUMMARY => \(.healthSummary)"'
+            fi
+        done
+    else
+        echo -e "\n${YELLOW}No Datahubs on this Environment${NC}\n"
+    fi
 }
 
 # Function: main - Run the required functions {{{1
@@ -152,3 +157,6 @@ function main ()
 
 clear
 main $1
+
+# DL is not running or is not created
+# No DHs
