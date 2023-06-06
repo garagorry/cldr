@@ -256,6 +256,7 @@ function main ()
                 sleep 30
                 kill -9 $SPIN_PID 2>/dev/null
                 wait $SPIN_PID >/dev/null 2>&1  
+                
                 echo -e "Stopping all MGMT services on: [${RED}${CM_CLUSTER_NAME}${NC}]\n"              
                 cluster_mgmt_service_stop_all
                 echo
@@ -278,21 +279,29 @@ function main ()
                 sleep 30
                 kill -9 $SPIN_PID 2>/dev/null
                 wait $SPIN_PID >/dev/null 2>&1  
+
                 echo -e "Starting all MGMT services on: [${RED}${CM_CLUSTER_NAME}${NC}]\n" 
                 cluster_mgmt_service_start_all
                 ;;
             "Regenerate All Kerberos Credentials")
                 clear
+                echo -e "Generate Missing Credentials on: [${RED}${CM_CLUSTER_NAME}${NC}]\n"
                 cluster_delete_kerberos_creds
                 echo
                 do_spin &
                 SPIN_PID=$!
                 sleep 30
+                kill -9 $SPIN_PID 2>/dev/null
+                wait $SPIN_PID >/dev/null 2>&1  
+                
                 cluster_regenerate_kerberos_creds
                 echo
                 do_spin &
                 SPIN_PID=$!
-                echo -e "Now start All services on: [${RED}${CM_CLUSTER_NAME}${NC}]\n" 
+                sleep 30
+                kill -9 $SPIN_PID 2>/dev/null
+                wait $SPIN_PID >/dev/null 2>&1  
+                echo -e "\nNow \"Start All Cluster Services\" on: [${RED}${CM_CLUSTER_NAME}${NC}]\n" 
                 ;;
             "Exit")
                 exit 0
