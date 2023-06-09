@@ -10,7 +10,16 @@ function do_check_arguments_required ()
 {
     if [[ $# -ne 4 ]]
     then
-        echo -e "${RED}USAGE:${NC} ${0} UserName EnvName RemoteHost PrivateKey"
+        echo -e "${RED}USAGE:${NC} ${0} UserName EnvName RemoteHost PrivateKey\n"
+        cat <<EOF
+Where:
+
+UserName => The regular workload user (user1) or the machine user (srv_user1).
+EnvName => The Environment name (You can get this from the Management Console).
+RemoteHost => The IP or FQDN of the host where you would like to copy the keytab.
+PrivateKey => The location for your Cloudbreak Private key.
+EOF
+        echo
         exit 1
     fi
 }
@@ -125,5 +134,6 @@ function main ()
 
 }
 
+clear
 main $1 $2 $3 $4
 exit 0
