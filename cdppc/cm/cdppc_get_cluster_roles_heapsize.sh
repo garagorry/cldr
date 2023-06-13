@@ -101,6 +101,8 @@ function get_roles_running_supervisorctl ()
 {
         source activate_salt_env
         salt '*' cmd.run 'echo exit | /opt/cloudera/cm-agent/bin/supervisorctl -c /var/run/cloudera-scm-agent/supervisor/supervisord.conf' 2>/dev/null
+        echo -e "\nFree Memory\n"
+        free --human --wide --total
 }
 
 # Function: main - Call the actions {{{1
