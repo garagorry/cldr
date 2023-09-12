@@ -146,9 +146,13 @@ ps -eo pid,user,command | grep $(systemctl status cloudera-scm-server | awk '/Ma
 if [[ $? -eq 0 ]]
 then
     main
-    echo -e "\n\nPlease review the information at:\n"
+    echo -e "\n\nPlease review the information gathered in the following directories:\n"
     #ls -lrdth ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups}
-    ls -lrth ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups}
+    ls -lrth ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups} | grep -v '^total'
+    echo
+    tar czf ${OUTPUT_DIR}/ServiceConfigs_roleConfigGroups_$(date +"%Y%m%d%H%M%S").tgz ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups} 2>/dev/null
+    echo -e "\nIf you agree with the information gathered, please share the following bundle:\n"
+    ls -lrdth ${OUTPUT_DIR}/ServiceConfigs_roleConfigGroups_*.tgz 
     echo
     exit 0
 else 
