@@ -159,7 +159,7 @@ else
     1) cp /etc/default/cloudera-scm-server /etc/default/cloudera-scm-server_\$(date +"%Y%m%d%H%M%S").orig
     2) Edit the /etc/default/cloudera-scm-server file by adding the following property <<-Dcom.cloudera.api.redaction=false>> (separate each property with a space) to the line that begins with export CMF_JAVA_OPTS.
     # Example: 
-    # export CMF_JAVA_OPTS="-Xmx4G -XX:MaxPermSize=256m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -Dcom.sun.management.jmxremote.ssl.enabled.protocols=TLSv1.2 -Dcom.cloudera.api.redaction=false")"
+    # export CMF_JAVA_OPTS="-Xmx4G -XX:MaxPermSize=256m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -Dcom.sun.management.jmxremote.ssl.enabled.protocols=TLSv1.2 -Dcom.cloudera.api.redaction=false"
     3) Restart Cloudera Manager Server
     systemctl restart cloudera-scm-server; tail -f /var/log/cloudera-scm-server/cloudera-scm-server.log | grep -i 'started jetty server'
     4) Execute the script => $0 again
