@@ -147,7 +147,8 @@ if [[ $? -eq 0 ]]
 then
     main
     echo -e "\n\nPlease review the information at:\n"
-    ls -lrdth ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups}
+    #ls -lrdth ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups}
+    ls -lrth ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups}
     echo
     exit 0
 else 
