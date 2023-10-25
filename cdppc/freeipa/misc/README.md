@@ -29,7 +29,6 @@ the Privacy Policies of these sites as well as their "Terms of Service" before e
 
 <h3>How to use it</h3>
 
-<p>
  1) Copy freeipa_status_functions.sh to ~/.freeipa_status_functions.sh 
  2) Add the following lines to your ~/.bashrc profile file:
     source ~/.freeipa_status_functions.sh
@@ -39,4 +38,3 @@ the Privacy Policies of these sites as well as their "Terms of Service" before e
     awk '/^function/ {print $2}' ~/.freeipa_functions
  5) Execute a test by using the function name, for example:
     freeipa_cipa_state
-</p>
