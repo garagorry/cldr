@@ -57,17 +57,28 @@ source ~/.bash_profile
 ```
 
 - [Configuring CDP client](https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-configuring-cdp-client-with-the-api-access-key.html "Configuring CDP client")
+
   To create a new default configuration for CDP Public Cloud:
 
 ```
 $ cdp configure
-CDP Access Key ID [None]: 6e7eba99.....8cd455f54986
-CDP Private Key [None]: tQZVC4G..../O3ATG38=
-CDP Region [None]: west-1
-CDP Endpoint URL (blank for public cloud) [None]:
 ```
 
-_cdp_region_ - The region for CDP API services. By default, the config file is found at** ~/.cdp/config.** possible values are: - **us-west-1 (default value)** - eu-1 - ap-1 - usg-1
+`CDP Access Key ID [None]: 6e7eba99.....8cd455f54986
+CDP Private Key [None]: tQZVC4G..../O3ATG38=
+CDP Region [None]: west-1
+CDP Endpoint URL (blank for public cloud) [None]:`
+
+_cdp_region_
+
+The region for CDP API services. By default, the config file is found at\*\* ~/.cdp/config.
+
+\*\* possible values are:
+
+- **us-west-1 (default value)**
+- eu-1
+- ap-1
+- usg-1
 
 ### Azure CLI
 
@@ -94,11 +105,11 @@ The script will create a custom role in the Azure subscription or it will use a 
 - **minimal**
   - The minimal role only allows for Environment, Data Lake and Data Hub creation!
 - **def1**
-  - [Role definition 1: Allows CDP to access and use only a single existing resource group and create service endpoints](Role definition 1: Allows CDP to access and use only a single existing resource group and create service endpoints "Role definition 1: Allows CDP to access and use only a single existing resource group and create service endpoints")
+  - [Role definition 1](Role definition 1 "Role definition 1")
 - **def2**
-  - [Role definition 2: Allows CDP to access and use only a single existing resource group and create private endpoints](Role definition 2: Allows CDP to access and use only a single existing resource group and create private endpoints "Role definition 2: Allows CDP to access and use only a single existing resource group and create private endpoints")
+  - [Role definition 2](https://docs.cloudera.com/cdp-public-cloud/cloud/requirements-azure/topics/mc-azure-credential.html#pnavId3 "Role definition 2")
 - **def3**
-  - [Role definition 3: Allows CDP to create multiple resource groups within your subscription](Role definition 3: Allows CDP to create multiple resource groups within your subscription "Role definition 3: Allows CDP to create multiple resource groups within your subscription")
+  - [Role definition 3](https://docs.cloudera.com/cdp-public-cloud/cloud/requirements-azure/topics/mc-azure-credential.html#pnavId4 "Role definition 3")
 
 ### Deployment Options [2]
 
@@ -132,19 +143,23 @@ When you deploy a Datahub using a default cluster template you need to match the
 - To get the current Default Cluster Templates for the Current RunTime Version.
 
 ```bash
-`cdp datahub list-cluster-templates  | jq -r '.clusterTemplates[] | select( .status | contains("DEFAULT")) | "\(.clusterTemplateName)"' | grep ${RUN_TIME} | grep -v SDX | sort -k2`
+cdp datahub list-cluster-templates  | jq -r '.clusterTemplates[] | select( .status | contains("DEFAULT")) | "\(.clusterTemplateName)"' | grep ${RUN_TIME} | grep -v SDX | sort -k2
 ```
 
 - To get the current Default Cluster Definitions for Templates using the Current RunTime Version.
 
 ```bash
-`cdp datahub list-cluster-definitions  | jq -r '.clusterDefinitions[].clusterDefinitionName'  | awk "/${RUN_TIME}/ && /Azure/" | sort -k2`
+cdp datahub list-cluster-definitions  | jq -r '.clusterDefinitions[].clusterDefinitionName'  | awk "/${RUN_TIME}/ && /Azure/" | sort -k2
 ```
 
 **_Example:_**
+
 _Cluster Template_
+
 **7.2.17 - Data Engineering: Apache Spark3**
+
 _Cluster Definition_
+
 **7.2.17 - Data Engineering Spark3 for Azure**
 
 ## Working Example:
