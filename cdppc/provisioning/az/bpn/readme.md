@@ -207,7 +207,7 @@ _Cluster Template_
 1. 7.2.17 - COD Edge Node
 2. 7.2.17 - Data Discovery and Exploration
 3. 7.2.17 - Data Engineering: Apache Spark, Apache Hive, Apache Oozie
-   **4) 7.2.17 - Data Engineering: Apache Spark3**
+   ==> **4) 7.2.17 - Data Engineering: Apache Spark3** <==
 4. 7.2.17 - Data Engineering: HA: Apache Spark, Apache Hive, Apache Oozie
 5. 7.2.17 - Data Engineering: HA: Apache Spark3, Apache Hive, Apache Oozie
 6. 7.2.17 - Data Mart: Apache Impala, Hue
@@ -229,7 +229,7 @@ _Cluster Definition_
 2. 7.2.17 - Data Discovery and Exploration for Azure
 3. 7.2.17 - Data Engineering HA - Spark3 for Azure
 4. 7.2.17 - Data Engineering HA for Azure
-   **5) 7.2.17 - Data Engineering Spark3 for Azure**
+   ==> **5) 7.2.17 - Data Engineering Spark3 for Azure** <==
 5. 7.2.17 - Data Engineering for Azure
 6. 7.2.17 - Data Mart for Azure
 7. 7.2.17 - Edge Flow Management Light Duty for Azure
