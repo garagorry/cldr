@@ -207,21 +207,23 @@ _Cluster Template_
 1. 7.2.17 - COD Edge Node
 2. 7.2.17 - Data Discovery and Exploration
 3. 7.2.17 - Data Engineering: Apache Spark, Apache Hive, Apache Oozie
-   ==> **4) 7.2.17 - Data Engineering: Apache Spark3** <==
-4. 7.2.17 - Data Engineering: HA: Apache Spark, Apache Hive, Apache Oozie
-5. 7.2.17 - Data Engineering: HA: Apache Spark3, Apache Hive, Apache Oozie
-6. 7.2.17 - Data Mart: Apache Impala, Hue
-7. 7.2.17 - Edge Flow Management Light Duty
-8. 7.2.17 - Flow Management Heavy Duty with Apache NiFi, Apache NiFi Registry, Schema Registry
-9. 7.2.17 - Flow Management Light Duty with Apache NiFi, Apache NiFi Registry, Schema Registry
-10. 7.2.17 - Real-time Data Mart: Apache Impala, Hue, Apache Kudu, Apache Spark
-11. 7.2.17 - Real-time Data Mart: Apache Impala, Hue, Apache Kudu, Apache Spark3
-12. 7.2.17 - Search Analytics
-13. 7.2.17 - Streaming Analytics Heavy Duty with Apache Flink
-14. 7.2.17 - Streaming Analytics Light Duty with Apache Flink
-15. 7.2.17 - Streams Messaging Heavy Duty: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
-16. 7.2.17 - Streams Messaging High Availability: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
-17. 7.2.17 - Streams Messaging Light Duty: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
+
+**==> 4) 7.2.17 - Data Engineering: Apache Spark3 <==**
+
+5. 7.2.17 - Data Engineering: HA: Apache Spark, Apache Hive, Apache Oozie
+6. 7.2.17 - Data Engineering: HA: Apache Spark3, Apache Hive, Apache Oozie
+7. 7.2.17 - Data Mart: Apache Impala, Hue
+8. 7.2.17 - Edge Flow Management Light Duty
+9. 7.2.17 - Flow Management Heavy Duty with Apache NiFi, Apache NiFi Registry, Schema Registry
+10. 7.2.17 - Flow Management Light Duty with Apache NiFi, Apache NiFi Registry, Schema Registry
+11. 7.2.17 - Real-time Data Mart: Apache Impala, Hue, Apache Kudu, Apache Spark
+12. 7.2.17 - Real-time Data Mart: Apache Impala, Hue, Apache Kudu, Apache Spark3
+13. 7.2.17 - Search Analytics
+14. 7.2.17 - Streaming Analytics Heavy Duty with Apache Flink
+15. 7.2.17 - Streaming Analytics Light Duty with Apache Flink
+16. 7.2.17 - Streams Messaging Heavy Duty: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
+17. 7.2.17 - Streams Messaging High Availability: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
+18. 7.2.17 - Streams Messaging Light Duty: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
 
 _Cluster Definition_
 
@@ -229,16 +231,18 @@ _Cluster Definition_
 2. 7.2.17 - Data Discovery and Exploration for Azure
 3. 7.2.17 - Data Engineering HA - Spark3 for Azure
 4. 7.2.17 - Data Engineering HA for Azure
-   ==> **5) 7.2.17 - Data Engineering Spark3 for Azure** <==
-5. 7.2.17 - Data Engineering for Azure
-6. 7.2.17 - Data Mart for Azure
-7. 7.2.17 - Edge Flow Management Light Duty for Azure
-8. 7.2.17 - Flow Management Heavy Duty for Azure
-9. 7.2.17 - Flow Management Light Duty for Azure
-10. 7.2.17 - Real-time Data Mart - Spark3 for Azure
-11. 7.2.17 - Real-time Data Mart for Azure
-12. 7.2.17 - Streaming Analytics Heavy Duty for Azure
-13. 7.2.17 - Streaming Analytics Light Duty for Azure
-14. 7.2.17 - Streams Messaging Heavy Duty for Azure
-15. 7.2.17 - Streams Messaging High Availability for Azure
-16. 7.2.17 - Streams Messaging Light Duty for Azure
+
+**==> 5) 7.2.17 - Data Engineering Spark3 for Azure <==**
+
+6. 7.2.17 - Data Engineering for Azure
+7. 7.2.17 - Data Mart for Azure
+8. 7.2.17 - Edge Flow Management Light Duty for Azure
+9. 7.2.17 - Flow Management Heavy Duty for Azure
+10. 7.2.17 - Flow Management Light Duty for Azure
+11. 7.2.17 - Real-time Data Mart - Spark3 for Azure
+12. 7.2.17 - Real-time Data Mart for Azure
+13. 7.2.17 - Streaming Analytics Heavy Duty for Azure
+14. 7.2.17 - Streaming Analytics Light Duty for Azure
+15. 7.2.17 - Streams Messaging Heavy Duty for Azure
+16. 7.2.17 - Streams Messaging High Availability for Azure
+17. 7.2.17 - Streams Messaging Light Duty for Azure
