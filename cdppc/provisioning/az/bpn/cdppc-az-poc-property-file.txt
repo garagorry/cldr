@@ -1,0 +1,179 @@
+### PROPERTIES FILE ###
+#
+#------#
+# MISC #
+#------#
+# CLI client setup
+#  To set up the CDP client, complete the following tasks:
+#   Generating an API access key
+#    https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-cli-generating-an-api-access-key.html
+#   Installing CDP client
+#    https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html
+#   Configuring CDP client
+#    https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-configuring-cdp-client-with-the-api-access-key.html
+#   Configuring CLI autocomplete
+#    https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-configure-cli-autocomplete.html
+
+#----------------#
+# CDP API ACCESS #
+#----------------#
+# To get the profile names
+# grep '^\[' ~/.cdp/credentials
+# export CDP_PROFILE=sandbox 
+# export CDP_CREDENTIAL_NAME=bnp-az-cred
+
+#-----------------#
+# root SSH ACCESS #
+#-----------------#
+# How to create SSH Keys for accessin in future the VMs
+# ssh-keygen -t rsa -b 4096 -C "jimmy@garagorry.com" -f ~/.ssh/jdga-csa-az-key
+export PUBLIC_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCvG104Z15GbD5etVZjtz4UMO45/D9oVvMO1JNZ46Ny5rghKNvc2DW5IWiH8o2DsguHnuzCSPC+rto5VZYwMzwU3yasvalZG61eIqaH98aFvKN30DsqhPO3TeQ3+9aXVigEYP3AmCoKS9rbgYciMqcmFQjxE6PghnygVmcAxN0wb1uQ/gayCs4eDm55WvVFKqDiOKh3kA3INAYyXnVORABhIDF333agkDrqohnhY2/aC/rSL5RQr9m24ESmvKZ7OhWL0rkIssAxVr2I/MlrUnmEknZZ/BIqZUpTy9ffwtYbg+ortrXBUzlHsRCUo2hnBs1YUbdiWQi1lAdxJE/fwIDGqfdvZ9I8VzOHHC+BzzovZZc2v2D7WiBh4Lpy+4xcs0iIFmiNcmTn/SBaIYGL0ouLmvJid+UfunmUx2EZLiSG8yYpbC/Xt1QwHDkBnUSplwA13PL0ExLrXuq/fQYhcYnsiiuGECjmAMKaGCXyHd6wq/pwU8IN3LdMWpbjozOUkSwKWAVHCApsSMePL4kdDR3GPEmRpE9IYjTK5aGk9ceuucZcrBmjUDovgxT6/Hbu/bYauExW8MakWlpncNuFNuMLboPAtqhdtOrZzEK/t1YLZHn+iGKNIB6/DiahryOXbsAlHmRbTWhRXRvUPO1exrkiOW1L2Ye4fwY0dea2+cg3ZQ== jimmy@garagorry.com"
+
+#----------------#
+# PRE-REQUISITES #
+#----------------#
+# Region
+# az account list-locations --output json | jq -r '.[] | "\(.displayName)|\(.name)"'
+export LOCATION="eastus"
+export SEQ_NUMBER=01
+export IDENTITES_PREFIX=azbigp001mid
+export CDP_CREATOR=bnp_user
+export PREFIX=bpnpoc
+
+## Resource Group
+export RESOURCE_GROUP_NAME="rg-bigdata"
+## Azure built-in roles
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
+# Storage Blob Delegator
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#storage-blob-delegator
+export AZURE_STORAGE_BLOB_DELEGATOR_GUID="db58b8e5-c6ad-4a2a-8342-4190687cbf4a"
+# Storage Blob Data Contributor
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#storage-blob-data-contributor
+export AZURE_STORAGE_CONTRIBUTOR_GUID="ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+# Storage Blob Data Owner
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#storage-blob-data-owner
+export AZURE_STORAGE_OWNER_GUID="b7e6dc6d-f1e8-4753-8033-0f276bb0955b"
+# Virtual Machine Contributor
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#virtual-machine-contributor
+export AZURE_VM_CONTRIBUTOR_GUID="9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
+# Managed Identity Operator
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#managed-identity-operator
+export AZURE_MANAGED_IDENTITY_OPERATOR_GUID="f1a07417-d97a-45cb-824c-7a7467783830"
+
+## Storage Account
+export STORAGE_ACCOUNT_NAME="azbigp001sta"
+export STORAGE_ACCOUNT_SKU=Standard_RAGRS
+export STORAGE_ACCOUNT_KIND=StorageV2
+export STORAGE_ACCOUNT_CONTAINER_DATA=data
+export STORAGE_ACCOUNT_CONTAINER_LOG=logs
+export STORAGE_ACCOUNT_CONTAINER_BACKUP=backups
+export IDENTITY_PATTERN=${IDENTITES_PREFIX}-${SEQ_NUMBER}
+export ASSUMER_IDENTITY="${IDENTITY_PATTERN}-AssumerIdentity"
+export ADMIN_IDENTITY="${IDENTITY_PATTERN}-AdminIdentity"
+export LOGGER_IDENTITY="${IDENTITY_PATTERN}-LoggerIdentity"
+export RANGER_AUDIT_LOGGER_IDENTITY="${IDENTITY_PATTERN}-RangerLoggerIdentity"
+export RANGER_RAZ_IDENTITY="${IDENTITY_PATTERN}-RangerRazIdentity"
+export STORAGE_RESOURCE_GROUP_ID=$(az group list --query "[?name=='$RESOURCE_GROUP_NAME']" | jq -r '.[0].id')
+export STORAGE_LOCATION_BASE=data
+export LOGS_LOCATION_BASE=logs
+export BACKUP_LOCATION_BASE=backups
+
+## Subscription
+export SUBSCRIPTION_ID=$(az account show | jq -r .id)
+
+## Networking & Security
+# https://www.solarwinds.com/free-tools/advanced-subnet-calculator
+#
+# 10.34.0.0/24
+# Subnet	Start Address	End Address	Network Address	Broadcast Address
+# 10.34.0.0/26	    10.34.0.1	10.34.0.62	10.34.0.0	10.34.0.63
+# 10.34.0.64/26	    10.34.0.65	10.34.0.126	10.34.0.64	10.34.0.127
+# 10.34.0.128/26	10.34.0.129	10.34.0.190	10.34.0.128	10.34.0.191
+# 10.34.0.192/26	10.34.0.193	10.34.0.254	10.34.0.192	10.34.0.255
+
+export VNET_NAME=azcomp004vnet
+export VNET_CIDR=10.34.0.0/24
+export SUBNET_CIDR="10.34.0.0/26 10.34.0.64/26 10.34.0.128/26"
+export SUBNET_PATTERN=cloudera
+export SG_CIDR_LOCAL_ALLOWED="165.1.200.21/32,'My First CIDR Allowed'|165.1.100.90/32,'My Second CIDR Allowed'|152.131.80.190/32,'My Thirds CIDR Allowed'"
+
+## TAGS
+# No white spaces in values
+export CUSTOM_TAGS="key=owner,value=${CDP_CREATOR} key=dept,value=Sales-SE-Cloud key=project,value=${SEQ_NUMBER}"
+
+
+#-------------#
+# ENVIRONMENT #
+#-------------#
+export FREEIPA_IMAGE_CATALOG=""
+export FREEIPA_IMAGE_ID=""
+export FREEIPA_NODES=2
+
+#-----------#
+# DATA LAKE #
+#-----------#
+# cdp datalake create-azure-datalake --help
+## Data Lake Scales. Possible values:
+#  MICRO_DUTY
+#  LIGHT_DUTY
+#  MEDIUM_DUTY_HA
+#  ENTERPRISE
+#  CUSTOM
+export DL_SCALE=LIGHT_DUTY
+## Data Lake run time
+export RUN_TIME=7.2.17
+## Data Lake custom image
+export SDX_CUSTOM_IMAGE_ID=""
+export SDX_IMAGE_CATALOG_URL=""
+export SDX_IMAGE_CATALOG_NAME=""
+
+#----------#
+# DATAHUBS #
+#----------#
+export DH_CUSTOM_IMAGE_ID=""
+export DH_IMAGE_CATALOG_URL=""
+export DH_IMAGE_CATALOG_NAME=""
+export DH_CUSTOM_TEMPLATE=
+#
+# To get the current Default Cluster Templates for the Current RunTime Version
+# cdp datahub list-cluster-templates  | jq -r '.clusterTemplates[] | select( .status | contains("DEFAULT")) | "\(.clusterTemplateName)"' | grep ${RUN_TIME} | grep -v SDX | sort -k2
+#7.2.17 - COD Edge Node
+#7.2.17 - Data Discovery and Exploration
+#7.2.17 - Data Engineering: Apache Spark, Apache Hive, Apache Oozie
+#7.2.17 - Data Engineering: Apache Spark3
+#7.2.17 - Data Engineering: HA: Apache Spark, Apache Hive, Apache Oozie
+#7.2.17 - Data Engineering: HA: Apache Spark3, Apache Hive, Apache Oozie
+#7.2.17 - Data Mart: Apache Impala, Hue
+#7.2.17 - Edge Flow Management Light Duty
+#7.2.17 - Flow Management Heavy Duty with Apache NiFi, Apache NiFi Registry, Schema Registry
+#7.2.17 - Flow Management Light Duty with Apache NiFi, Apache NiFi Registry, Schema Registry
+#7.2.17 - Real-time Data Mart: Apache Impala, Hue, Apache Kudu, Apache Spark
+#7.2.17 - Real-time Data Mart: Apache Impala, Hue, Apache Kudu, Apache Spark3
+#7.2.17 - Search Analytics
+#7.2.17 - Streaming Analytics Heavy Duty with Apache Flink
+#7.2.17 - Streaming Analytics Light Duty with Apache Flink
+#7.2.17 - Streams Messaging Heavy Duty: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
+#7.2.17 - Streams Messaging High Availability: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
+#7.2.17 - Streams Messaging Light Duty: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
+
+# To get the current Default Cluster Definitions for Templates using the Current RunTime Version
+cdp datahub list-cluster-definitions  | jq -r '.clusterDefinitions[].clusterDefinitionName'  | awk "/${RUN_TIME}/ && /Azure/" | sort -k2
+7.2.17 - COD Edge Node for Azure
+7.2.17 - Data Discovery and Exploration for Azure     
+7.2.17 - Data Engineering HA - Spark3 for Azure       
+7.2.17 - Data Engineering HA for Azure
+7.2.17 - Data Engineering Spark3 for Azure
+7.2.17 - Data Engineering for Azure
+7.2.17 - Data Mart for Azure
+7.2.17 - Edge Flow Management Light Duty for Azure    
+7.2.17 - Flow Management Heavy Duty for Azure
+7.2.17 - Flow Management Light Duty for Azure
+7.2.17 - Real-time Data Mart - Spark3 for Azure       
+7.2.17 - Real-time Data Mart for Azure
+7.2.17 - Streaming Analytics Heavy Duty for Azure     
+7.2.17 - Streaming Analytics Light Duty for Azure     
+7.2.17 - Streams Messaging Heavy Duty for Azure       
+7.2.17 - Streams Messaging High Availability for Azure
+7.2.17 - Streams Messaging Light Duty for Azure   
+
+
