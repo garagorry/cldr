@@ -118,7 +118,7 @@ The script will create a custom role in the Azure subscription or it will use a 
 - It can be used to create the pre-requisites on Azure for an Environment with Service Endpoints or Private Endpoints.
 - It can be used to deploy a RAZ/Non-RAZ Data Lake.
 - It always deploy the latyest version available.
-- It can be used to deploy a default cluster template/definition for a choosen Datahub.
+- It can be used to deploy a default cluster template/definition for a chosen Datahub.
 
 ##### The options available are:
 
@@ -140,7 +140,7 @@ The script will create a custom role in the Azure subscription or it will use a 
 
 ### Datahub Deployment Considerations
 
-When you deploy a Datahub using a default cluster template you need to match the Cluster Definition for the template choosen.
+When you deploy a Datahub using a default cluster template you need to match the Cluster Definition for the template chosen.
 
 - To get the current Default Cluster Templates for the Current RunTime Version.
 
