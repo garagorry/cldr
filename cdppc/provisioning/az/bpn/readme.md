@@ -70,9 +70,7 @@ To create a new default configuration for CDP Public Cloud you need to provide t
 - CDP Region [None]: **_west-1_**
 - CDP Endpoint URL (blank for public cloud) [None]:
 
-The **_cdp_region_** is the region for CDP API services.
-
-**possible values are:**
+The **_cdp_region_** is the region for CDP API services. **The values are:**
 
 - **us-west-1 (default value)**
 - eu-1
