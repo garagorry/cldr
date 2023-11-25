@@ -203,6 +203,9 @@ In this step you should select RAZ or Non-RAZ pre-requisites.
 In this step you will use:
 
 _Cluster Template_
+
 **7.2.17 - Data Engineering: Apache Spark3**
+
 _Cluster Definition_
+
 **7.2.17 - Data Engineering Spark3 for Azure**
