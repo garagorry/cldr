@@ -64,16 +64,18 @@ source ~/.bash_profile
 $ cdp configure
 ```
 
-`CDP Access Key ID [None]: 6e7eba99.....8cd455f54986
+```
+CDP Access Key ID [None]: 6e7eba99.....8cd455f54986
 CDP Private Key [None]: tQZVC4G..../O3ATG38=
 CDP Region [None]: west-1
-CDP Endpoint URL (blank for public cloud) [None]:`
+CDP Endpoint URL (blank for public cloud) [None]:
+```
 
 _cdp_region_
 
 The region for CDP API services. By default, the config file is found at\*\* ~/.cdp/config.
 
-\*\* possible values are:
+** possible values are:**
 
 - **us-west-1 (default value)**
 - eu-1
