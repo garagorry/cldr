@@ -75,7 +75,7 @@ _cdp_region_
 
 The region for CDP API services. By default, the config file is found at\*\* ~/.cdp/config.
 
-** possible values are:**
+**possible values are:**
 
 - **us-west-1 (default value)**
 - eu-1
@@ -107,7 +107,7 @@ The script will create a custom role in the Azure subscription or it will use a 
 - **minimal**
   - The minimal role only allows for Environment, Data Lake and Data Hub creation!
 - **def1**
-  - [Role definition 1](Role definition 1 "Role definition 1")
+  - [Role definition 1](https://docs.cloudera.com/cdp-public-cloud/cloud/requirements-azure/topics/mc-azure-credential.html#pnavId2 "Role definition 1")
 - **def2**
   - [Role definition 2](https://docs.cloudera.com/cdp-public-cloud/cloud/requirements-azure/topics/mc-azure-credential.html#pnavId3 "Role definition 2")
 - **def3**
