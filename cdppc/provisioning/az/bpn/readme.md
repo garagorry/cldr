@@ -65,12 +65,12 @@ $ cdp configure
 
 To create a new default configuration for CDP Public Cloud you need to provide the following inputs:
 
-- CDP Access Key ID [None]: 6e7eba99.....8cd455f54986
-- CDP Private Key [None]: tQZVC4G..../O3ATG38=
-- CDP Region [None]: west-1
+- CDP Access Key ID [None]: **_6e7eba99.....8cd455f54986_**
+- CDP Private Key [None]: **_tQZVC4G..../O3ATG38=_**
+- CDP Region [None]: **_west-1_**
 - CDP Endpoint URL (blank for public cloud) [None]:
 
-The _cdp_region_ is the region for CDP API services.
+The **_cdp_region_** is the region for CDP API services.
 
 **possible values are:**
 
