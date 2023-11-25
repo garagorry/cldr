@@ -157,23 +157,21 @@ export DH_CUSTOM_TEMPLATE=
 #7.2.17 - Streams Messaging Light Duty: Apache Kafka, Schema Registry, Streams Messaging Manager, Streams Replication Manager, Cruise Control
 
 # To get the current Default Cluster Definitions for Templates using the Current RunTime Version
-cdp datahub list-cluster-definitions  | jq -r '.clusterDefinitions[].clusterDefinitionName'  | awk "/${RUN_TIME}/ && /Azure/" | sort -k2
-7.2.17 - COD Edge Node for Azure
-7.2.17 - Data Discovery and Exploration for Azure     
-7.2.17 - Data Engineering HA - Spark3 for Azure       
-7.2.17 - Data Engineering HA for Azure
-7.2.17 - Data Engineering Spark3 for Azure
-7.2.17 - Data Engineering for Azure
-7.2.17 - Data Mart for Azure
-7.2.17 - Edge Flow Management Light Duty for Azure    
-7.2.17 - Flow Management Heavy Duty for Azure
-7.2.17 - Flow Management Light Duty for Azure
-7.2.17 - Real-time Data Mart - Spark3 for Azure       
-7.2.17 - Real-time Data Mart for Azure
-7.2.17 - Streaming Analytics Heavy Duty for Azure     
-7.2.17 - Streaming Analytics Light Duty for Azure     
-7.2.17 - Streams Messaging Heavy Duty for Azure       
-7.2.17 - Streams Messaging High Availability for Azure
-7.2.17 - Streams Messaging Light Duty for Azure   
-
-
+# cdp datahub list-cluster-definitions  | jq -r '.clusterDefinitions[].clusterDefinitionName'  | awk "/${RUN_TIME}/ && /Azure/" | sort -k2
+#7.2.17 - COD Edge Node for Azure
+#7.2.17 - Data Discovery and Exploration for Azure     
+#7.2.17 - Data Engineering HA - Spark3 for Azure       
+#7.2.17 - Data Engineering HA for Azure
+#7.2.17 - Data Engineering Spark3 for Azure
+#7.2.17 - Data Engineering for Azure
+#7.2.17 - Data Mart for Azure
+#7.2.17 - Edge Flow Management Light Duty for Azure    
+#7.2.17 - Flow Management Heavy Duty for Azure
+#7.2.17 - Flow Management Light Duty for Azure
+#7.2.17 - Real-time Data Mart - Spark3 for Azure       
+#7.2.17 - Real-time Data Mart for Azure
+#7.2.17 - Streaming Analytics Heavy Duty for Azure     
+#7.2.17 - Streaming Analytics Light Duty for Azure     
+#7.2.17 - Streams Messaging Heavy Duty for Azure       
+#7.2.17 - Streams Messaging High Availability for Azure
+#7.2.17 - Streams Messaging Light Duty for Azure   
