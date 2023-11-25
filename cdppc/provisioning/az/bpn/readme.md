@@ -77,7 +77,7 @@ The **_cdp_region_** is the region for CDP API services. **The values are:**
 - ap-1
 - usg-1
 
-  By default, the config file is found at **_~/.cdp/config_**
+By default, the config file is found at **_~/.cdp/config_**
 
 ### Azure CLI
 
