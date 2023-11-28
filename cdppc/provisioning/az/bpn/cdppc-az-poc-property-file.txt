@@ -108,6 +108,7 @@ export CUSTOM_TAGS="key=owner,value=${CDP_CREATOR} key=dept,value=Sales-SE-Cloud
 export FREEIPA_IMAGE_CATALOG=""
 export FREEIPA_IMAGE_ID=""
 export FREEIPA_NODES=2
+export ENV_DESCRIPTION="BPN Produccion"
 
 #-----------#
 # DATA LAKE #
