@@ -6,9 +6,9 @@
 # ------------------------------------------------------------------
 
 # Load Properties
-source cdppc-az-repro-property-file.txt
+source cdppc-az-poc-property-file.txt
 # Load Functions
-source cdppc-az-repro-function-file.sh
+source cdppc-az-poc-function-file.sh
 
 # Color Codes:
 # ===========
