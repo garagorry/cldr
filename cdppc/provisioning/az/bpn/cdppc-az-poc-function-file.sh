@@ -611,7 +611,7 @@ function do_create_cdp_az_env ()
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
         --tags ${CUSTOM_TAGS} \
-        --description "Description of the environment"
+        --description "${ENV_DESCRIPTION}"
       set +x
       ;;
     freeipa-pep-no-custom-img)
@@ -634,7 +634,7 @@ function do_create_cdp_az_env ()
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
         --tags ${CUSTOM_TAGS} \
-        --description "Description of the environment"
+        --description "${ENV_DESCRIPTION}"
       set +x
       ;;
     freeipa-no-custom-img-priv)
@@ -657,7 +657,7 @@ function do_create_cdp_az_env ()
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
         --tags ${CUSTOM_TAGS} \
-        --description "Description of the environment"
+        --description "${ENV_DESCRIPTION}"
       set +x
       ;;
     freeipa-pep-no-custom-img-priv)
@@ -680,7 +680,7 @@ function do_create_cdp_az_env ()
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
         --tags ${CUSTOM_TAGS} \
-        --description "Description of the environment"
+        --description "${ENV_DESCRIPTION}"
       set +x
       ;;
     *) 
