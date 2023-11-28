@@ -10,6 +10,23 @@ source cdppc-az-repro-property-file.txt
 # Load Functions
 source cdppc-az-repro-function-file.sh
 
+# Color Codes:
+# ===========
+# Black        0;30     Dark Gray     1;30
+# Red          0;31     Light Red     1;31
+# Green        0;32     Light Green   1;32
+# Brown/Orange 0;33     Yellow        1;33
+# Blue         0;34     Light Blue    1;34
+# Purple       0;35     Light Purple  1;35
+# Cyan         0;36     Light Cyan    1;36      
+# Light Gray   0;37     White         1;37
+# -------------------------------------------------------------------
+export RED='\033[0;31m'
+export GREEN='\033[0;32m'
+export YELLOW='\033[1;33m'
+export BLUE='\033[0;34m'
+export NC='\033[0m' # No Color
+
 if (( $# != 2 ))
 then
   echo -e "\nThe valid arguments are:
@@ -76,11 +93,11 @@ else
 EOF
     while true
     do
-      echo -ne "\nWould you like to enable Ranger RAZ for this environment? [Y/N]: "
+      echo -ne "\nWould you like to enable Ranger RAZ for this environment? [y/n]: "
       read USE_RAZ_RESPONSE
 
       case ${USE_RAZ_RESPONSE} in
-        "y|Y|yes|YES")
+        "y")
           az_create_rg ${RESOURCE_GROUP_NAME} "${LOCATION}"
           az_create_vnet_subnets ${RESOURCE_GROUP_NAME} ${VNET_NAME} ${VNET_CIDR} ${SUBNET_PATTERN} ${SUBNET_CIDR}
           az_create_az_nsg ${RESOURCE_GROUP_NAME} ${PREFIX}
@@ -92,7 +109,7 @@ EOF
           az_create_ranger_raz_identity "${RESOURCE_GROUP_NAME}" "${RANGER_RAZ_IDENTITY}" "RANGER_RAZ_MSI_ID" ${AZURE_STORAGE_OWNER_GUID} ${SUBSCRIPTION_ID} ${STORAGE_ACCOUNT_NAME} ${AZURE_STORAGE_BLOB_DELEGATOR_GUID}
           break
           ;;
-        "n|N|No|NO")
+        "n")
           az_create_rg ${RESOURCE_GROUP_NAME} "${LOCATION}"
           az_create_vnet_subnets ${RESOURCE_GROUP_NAME} ${VNET_NAME} ${VNET_CIDR} ${SUBNET_PATTERN} ${SUBNET_CIDR}
           az_create_az_nsg ${RESOURCE_GROUP_NAME} ${PREFIX}
