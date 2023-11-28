@@ -596,7 +596,7 @@ function do_create_cdp_az_env ()
       set -x
       cdp environments create-azure-environment \
         --environment-name ${PREFIX}-env \
-        --credential-name "${CDP_CREDENTIAL_NAME}" \
+        --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
         --free-ipa instanceCountByGroup=${FREEIPA_NODES} \
@@ -619,7 +619,7 @@ function do_create_cdp_az_env ()
       set -x
       cdp environments create-azure-environment \
         --environment-name ${PREFIX}-env \
-        --credential-name "${CDP_CREDENTIAL_NAME}" \
+        --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
         --free-ipa instanceCountByGroup=${FREEIPA_NODES} \
@@ -642,7 +642,7 @@ function do_create_cdp_az_env ()
       set -x
       cdp environments create-azure-environment \
         --environment-name ${PREFIX}-env \
-        --credential-name "${CDP_CREDENTIAL_NAME}" \
+        --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
         --free-ipa instanceCountByGroup=${FREEIPA_NODES} \
@@ -665,7 +665,7 @@ function do_create_cdp_az_env ()
       set -x
       cdp environments create-azure-environment \
         --environment-name ${PREFIX}-env \
-        --credential-name "${CDP_CREDENTIAL_NAME}" \
+        --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
         --free-ipa instanceCountByGroup=${FREEIPA_NODES} \
