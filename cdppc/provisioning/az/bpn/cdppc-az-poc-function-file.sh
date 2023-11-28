@@ -46,12 +46,13 @@ function az_create_az_nsg ()
   # vnetname-knox-nsg
     RESOURCE_GROUP_NAME=$1
     VNET_NAME=$2
-    shift 2
+    LOCATION=$3
+    shift 3
     SG_CIDR_LOCAL_ALLOWED=$@
 
     for NSG_NAME in knox default
     do
-      az network nsg create -g ${RESOURCE_GROUP_NAME}  -n ${VNET_NAME}-${NSG_NAME}-nsg
+      az network nsg create -g ${RESOURCE_GROUP_NAME}  -n ${VNET_NAME}-${NSG_NAME}-nsg --location ${LOCATION}
 
       IFS="|"
       PRIORITY_SEQ=102
@@ -75,7 +76,7 @@ function az_create_az_nsg ()
       set +x
     done
 }
-# az_create_az_nsg ${RESOURCE_GROUP_NAME} ${VNET_NAME} ${SG_CIDR_LOCAL_ALLOWED}
+# az_create_az_nsg ${RESOURCE_GROUP_NAME} ${VNET_NAME} ${LOCATION} ${SG_CIDR_LOCAL_ALLOWED}
 
 function az_create_private_dnszones ()
 {
