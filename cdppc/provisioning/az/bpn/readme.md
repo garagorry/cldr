@@ -2,6 +2,10 @@
 
 This script will deploy an environment using the lastest version available.
 
+### Tested OS
+
+- Ubuntu 22.04.1 LTS
+
 ## Requirements
 
 ### Python & Virtualenv
