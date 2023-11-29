@@ -134,8 +134,30 @@ EOF
     az_create_custom_role_app_registration  "${RESOURCE_GROUP_NAME}" ${PREFIX} "${SUBSCRIPTION_ID}" "${ROLE_DEFINITION}"
     do_create_cdp_credential ${PREFIX} ${SUBSCRIPTION_ID}
     ;;
+  tags)
+    echo -e "\nPreparing CDP CLI Shorthand Syntax for: \n${CUSTOM_TAGS}\n"
+    echo -e "CDP CLI Shorthand Syntax \n--tags $(flatten_tags "${CUSTOM_TAGS}")\n"
+    ;;
+  az_tags)
+    echo -e "\nPreparing Azure CLI Shorthand Syntax for: \n${CUSTOM_TAGS}\n"
+    echo -e "Azure CLI Shorthand Syntax \n$(az_flatten_tags "${CUSTOM_TAGS}")\n"
+    # RESOURCE_GROUP_NAME_ID=$(az group show -n jdga8 --query id --output tsv)
+    # az tag create --resource-id ${RESOURCE_GROUP_NAME_ID} --tags 
+    # jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${RESOURCE_GROUP_NAME_ID} --operation Merge --tags |" | bash 
+    ;;
+  sep)
+    echo -e "\nEnabling Azure Storage & PostgreSQL Service Endpoints on ${VNET_NAME}\n"
+    az_enable_service_endpoints ${RESOURCE_GROUP_NAME} ${VNET_NAME} ${VNET_CIDR} ${SUBNET_PATTERN} ${SUBNET_CIDR}
+    ;;
+  pep)
+    echo -e "\nEnabling PostgreSQL Private DNS Zone for Private Endpoints\n"
+    az_disable_private_endpoint_network_policies ${RESOURCE_GROUP_NAME} ${VNET_NAME} ${VNET_CIDR} ${SUBNET_PATTERN} ${SUBNET_CIDR}
+    az_create_postgres_private_dnszone "${RESOURCE_GROUP_NAME}" "${SUBSCRIPTION_ID}" "privatelink.postgres.database.azure.com" "dnslink-postgres-${VNET_NAME}" "${CUSTOM_TAGS}"
+    echo -e "\nEnabling Storage Account (DFS) Private DNS Zone & Private Endpoints\n"
+    az_create_dfs_privatelink "${RESOURCE_GROUP_NAME}" "${STORAGE_ACCOUNT_NAME}" "${VNET_NAME}" "${SUBSCRIPTION_ID}" "privatelink.dfs.core.windows.net" "dnslink-dfs-${VNET_NAME}" "${CUSTOM_TAGS}"
+    ;;
   freeipa-no-custom-img)
-    # Latest FreeIPA image with Service EndPoints & Public IPs
+    # Latest FreeIPA image with Service EndPoints & Public IPsjq -r 
     do_activate_cdp_cli std > /dev/null 2>&1
     az_enable_service_endpoints ${RESOURCE_GROUP_NAME} ${VNET_NAME} ${VNET_CIDR} ${SUBNET_PATTERN} ${SUBNET_CIDR}
     do_create_cdp_az_env freeipa-no-custom-img
@@ -176,7 +198,7 @@ EOF
     do_create_dh_default_cluster "${PREFIX}" "${DEFAULT_DH_TEMPLATE_CHOOSEN}" "${DEFAULT_DH_DEFINITION_CHOOSEN}" "${CUSTOM_TAGS}"
     ;;    
   *)
-    echo "The value of \${2} should be one of the following: 'pre | cred | freeipa-no-custom-img | freeipa-pep-no-custom-img | freeipa-no-custom-img-priv | freeipa-pep-no-custom-img-priv | dl-raz-runtime | dl-no-raz-runtime | dh-runtime'"
+    echo "The value of \${2} should be one of the following: 'pre | cred | tags | az_tags | sep | pep | freeipa-no-custom-img | freeipa-pep-no-custom-img | freeipa-no-custom-img-priv | freeipa-pep-no-custom-img-priv | dl-raz-runtime | dl-no-raz-runtime | dh-runtime'"
     exit 54
     ;;
   esac
