@@ -5,12 +5,60 @@
 # Function File
 # ------------------------------------------------------------------
 
+function cdp_flatten_tags () 
+{
+  TAGS=$1
+  flattened_tags=""
+  for item in $(echo ${TAGS} | jq -r '.[] | @base64')
+  do
+    _jq() 
+    {
+      echo ${item} | base64 --decode | jq -r ${1}
+    }
+
+    key=$(_jq '.key')
+    value=$(_jq '.value')
+
+    flattened_tags="${flattened_tags} key=\"${key}\",value=\"${value}\""
+  done
+
+  echo ${flattened_tags}
+}
+# cdp_flatten_tags "${CUSTOM_TAGS}"
+
+function az_flatten_tags () 
+{
+  TAGS=$1
+  flattened_tags=""
+  for item in $(echo ${TAGS} | jq -r '.[] | @base64')
+  do
+    _jq() 
+    {
+      echo ${item} | base64 --decode | jq -r ${1}
+    }
+
+    key=$(_jq '.key')
+    value=$(_jq '.value')
+
+    if [[ -z ${flattened_tags} ]]
+    then
+      flattened_tags="\"${key}\"=\"${value}\""
+    else
+      flattened_tags="${flattened_tags} \"${key}\"=\"${value}\""
+    fi
+  done
+  echo ${flattened_tags}
+}
+# az_flatten_tags "${CUSTOM_TAGS}"
+
 function az_create_rg ()
 {
     RESOURCE_GROUP_NAME=$1
     LOCATION="$2"
     set -x
     az group create --name ${RESOURCE_GROUP_NAME} --location "${LOCATION}"
+    RESOURCE_GROUP_NAME_ID=$(az group show -n ${RESOURCE_GROUP_NAME} --query id --output tsv)
+    jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${RESOURCE_GROUP_NAME_ID} --operation Merge --tags |" | bash 
     set +x
 }
 # az_create_rg ${RESOURCE_GROUP_NAME} "${LOCATION}"
@@ -28,12 +76,17 @@ function az_create_vnet_subnets ()
 
     set -x
     az network vnet create -g ${RESOURCE_GROUP_NAME}  --name ${VNET_NAME} --address-prefix ${VNET_CIDR}
+    VNET_NAME_ID=$(az network vnet show --name ${VNET_NAME} --resource-group ${RESOURCE_GROUP_NAME} --query id --output tsv)
+    jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${VNET_NAME_ID} --operation Merge --tags |" | bash 
     set +x
 
     for subNet in ${SUBNET_CIDR}
     do
       set -x
       az network vnet subnet create -g ${RESOURCE_GROUP_NAME} -n ${SUBNET_PATTERN}-subnet-${SUBNET_COUNT} --vnet-name ${VNET_NAME} --address-prefixes ${subNet}
+      # az network vnet subnet show -g MyResourceGroup -n MySubnet --vnet-name MyVNet
+      SUBNET_NAME_ID=$(az network vnet subnet show --name ${SUBNET_PATTERN}-subnet-${SUBNET_COUNT} --vnet-name ${VNET_NAME} --resource-group ${RESOURCE_GROUP_NAME} --query id --output tsv)
+      jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${SUBNET_NAME_ID} --operation Merge --tags |" | bash 
       set +x
       (( SUBNET_COUNT += 1 ))
     done
@@ -52,7 +105,12 @@ function az_create_az_nsg ()
 
     for NSG_NAME in knox default
     do
+      set -x
       az network nsg create -g ${RESOURCE_GROUP_NAME}  -n ${VNET_NAME}-${NSG_NAME}-nsg --location ${LOCATION}
+      # az network nsg show -g MyResourceGroup -n MyNsg
+      NSG_NAMEID=$(az network nsg show -g ${RESOURCE_GROUP_NAME} -n ${VNET_NAME}-${NSG_NAME}-nsg --query id --output tsv)
+      jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${NSG_NAMEID} --operation Merge --tags |" | bash
+      set +x
 
       IFS="|"
       PRIORITY_SEQ=102
@@ -116,8 +174,13 @@ function az_create_private_dnszones ()
     az network private-dns zone create \
         --name ${zone_name} \
         --resource-group ${RESOURCE_GROUP_NAME} \
-        --subscription  ${SUBSCRIPTION_ID} \
-        --tags ${CUSTOM_TAGS}
+        --subscription  ${SUBSCRIPTION_ID} 
+        #--tags ${CUSTOM_TAGS}
+
+    #az network private-dns zone show -g MyResourceGroup -n www.mysite.com
+    #PRIVATE_DNS_ZONE_ID=$(az network private-dns zone show --resource-group ${RESOURCE_GROUP_NAME} --name ${zone_name} --query id --output tsv)
+    #jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${PRIVATE_DNS_ZONE_ID} --operation Merge --tags |" | bash
+
     set +x
     
     echo -e "create link to existing network ${link_name}"
@@ -129,8 +192,13 @@ function az_create_private_dnszones ()
         --registration-enabled false \
         --zone-name ${zone_name} \
         --virtual-network ${VNET_NAME} \
-        --subscription  ${SUBSCRIPTION_ID} \
-        --tags ${CUSTOM_TAGS}
+        --subscription  ${SUBSCRIPTION_ID} 
+        #--tags ${CUSTOM_TAGS}
+
+    #az network private-dns link vnet show -g MyResourceGroup -n MyLinkName -z www.mysite.com
+    #PRIVATE_DNS_LINK_ID=$(az network private-dns link vnet show -g ${RESOURCE_GROUP_NAME} -n ${link_name} -z ${zone_name} --query id --output tsv)
+    #jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${PRIVATE_DNS_LINK_ID} --operation Merge --tags |" | bash
+
     set +x
   done
 }
@@ -195,8 +263,12 @@ function az_create_postgres_private_dnszone ()
   az network private-dns zone create \
       --name ${PRIVATE_DNS_ZONE} \
       --resource-group ${RESOURCE_GROUP_NAME} \
-      --subscription  ${SUBSCRIPTION_ID} \
-      --tags ${CUSTOM_TAGS}
+      --subscription  ${SUBSCRIPTION_ID} 
+      #--tags ${CUSTOM_TAGS}
+
+  #PRIVATE_DNS_ZONE_ID=$(az network private-dns zone show --resource-group ${RESOURCE_GROUP_NAME} --name ${PRIVATE_DNS_ZONE} --query id --output tsv)
+  #jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${PRIVATE_DNS_ZONE_ID} --operation Merge --tags |" | bash
+
   set +x
 
   echo -e "create link to existing network ${PRIVATE_LINK_NAME}"
@@ -208,8 +280,12 @@ function az_create_postgres_private_dnszone ()
       --registration-enabled false \
       --zone-name ${PRIVATE_DNS_ZONE} \
       --virtual-network ${VNET_NAME} \
-      --subscription  ${SUBSCRIPTION_ID} \
-      --tags ${CUSTOM_TAGS}
+      --subscription  ${SUBSCRIPTION_ID} 
+      #--tags ${CUSTOM_TAGS}
+
+  #PRIVATE_DNS_LINK_ID=$(az network private-dns link vnet show -g ${RESOURCE_GROUP_NAME} -n ${PRIVATE_LINK_NAME} -z ${PRIVATE_DNS_ZONE} --query id --output tsv)
+  #jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${PRIVATE_DNS_LINK_ID} --operation Merge --tags |" | bash
+
   set +x
 }
 # az_create_postgres_private_dnszone "${RESOURCE_GROUP_NAME}" "${SUBSCRIPTION_ID}" "privatelink.postgres.database.azure.com" "dnslink-postgres-${VNET_NAME}" "${CUSTOM_TAGS}"
@@ -229,6 +305,9 @@ function az_create_sa_with_containers ()
   STORAGE_ACCOUNT_CONTAINER_BACKUP=$8
   set -x
   az storage account create --name ${STORAGE_ACCOUNT_NAME} --resource-group ${RESOURCE_GROUP_NAME} --location "${LOCATION}" --sku ${STORAGE_ACCOUNT_SKU} --kind ${STORAGE_ACCOUNT_KIND} --hns
+  #az storage account show -g MyResourceGroup -n MyStorageAccount
+  STORAGE_ACCOUNT_NAME_ID=$(az storage account show -g ${RESOURCE_GROUP_NAME} -n ${STORAGE_ACCOUNT_NAME} --query id --output tsv)
+  jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${STORAGE_ACCOUNT_NAME_ID} --operation Merge --tags |" | bash
   set +x
 
   # Create three containers in storage account
@@ -278,6 +357,10 @@ function az_create_dfs_privatelink ()
   --connection-name ${STORAGE_ACCOUNT_NAME}-cdp-dfs-plsc \
   --private-connection-resource-id ${STORAGE_ACCOUNT_ID} \
   --group-id dfs 
+
+  # az network private-endpoint show --name MyPrivateEndpoint --resource-group MyResourceGroup
+  PEP_ID=$(az network private-endpoint show --name ${STORAGE_ACCOUNT_NAME}-cdp-dfs-pep --resource-group ${RESOURCE_GROUP_NAME} --query id --output tsv)
+  jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${PEP_ID} --operation Merge --tags |" | bash
   set +x
   
   # Create a Private DNS Zone for Storage Account (Target DFS) server domain and create an association link with ${VNET_NAME}
@@ -287,8 +370,11 @@ function az_create_dfs_privatelink ()
   az network private-dns zone create \
       --name ${PRIVATE_DNS_ZONE} \
       --resource-group ${RESOURCE_GROUP_NAME} \
-      --subscription  ${SUBSCRIPTION_ID} \
-      --tags ${CUSTOM_TAGS}
+      --subscription  ${SUBSCRIPTION_ID} 
+      #--tags ${CUSTOM_TAGS}
+  
+  #PRIVATE_DNS_ZONE_ID=$(az network private-dns zone show --resource-group ${RESOURCE_GROUP_NAME} --name ${PRIVATE_DNS_ZONE} --query id --output tsv)
+  #jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${PRIVATE_DNS_ZONE_ID} --operation Merge --tags |" | bash
 
   set +x
   
@@ -301,8 +387,11 @@ function az_create_dfs_privatelink ()
       --registration-enabled false \
       --zone-name ${PRIVATE_DNS_ZONE} \
       --virtual-network ${VNET_NAME} \
-      --subscription  ${SUBSCRIPTION_ID} \
-      --tags ${CUSTOM_TAGS}
+      --subscription  ${SUBSCRIPTION_ID} 
+      #--tags ${CUSTOM_TAGS}
+
+  #PRIVATE_DNS_LINK_ID=$(az network private-dns link vnet show -g ${RESOURCE_GROUP_NAME} -n ${PRIVATE_LINK_NAME} -z ${PRIVATE_DNS_ZONE} --query id --output tsv)
+  #jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${PRIVATE_DNS_LINK_ID} --operation Merge --tags |" | bash
 
   # Get the ID of the azure storage NIC
   STORAGE_NIC_ID=$(az network private-endpoint show --name ${STORAGE_ACCOUNT_NAME}-cdp-dfs-pep  -g  ${RESOURCE_GROUP_NAME} --query 'networkInterfaces[0].id' -o tsv)
@@ -333,6 +422,7 @@ function az_create_identity()
    ID=$(echo ${RESULT} | jq -r '.id')
    PRINCIPALID=$(echo ${RESULT} | jq -r '.principalId')
    echo "Created user-assigned MSI with id: ${ID} and principal id: ${PRINCIPALID}"
+   jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${ID} --operation Merge --tags |" | bash
    echo "Please wait a minute" && sleep 60
 }
 
@@ -467,6 +557,7 @@ function az_create_custom_role_app_registration ()
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-default Cloudera Management Console Azure Operator" \
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
+
       set +x
       ;;
     minimal)
@@ -474,9 +565,11 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-minimal Cloudera Management Console Azure Operator|" -e "s|{subscriptionId}|${SUBSCRIPTION_ID}|" roles/minimal-template.json > roles/minimal.json
       set -x
       az role definition create --role-definition @roles/minimal.json
+
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-minimal Cloudera Management Console Azure Operator" \
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
+
       set +x
       ;;
     def1)
@@ -484,9 +577,11 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator For Single Resource Group|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def1 Cloudera Management Console Azure Operator For Single Resource Group|" -e "s|{SUBSCRIPTION-ID}|${SUBSCRIPTION_ID}|" -e "s|{RESOURCE-GROUP-NAME}|${RESOURCE_GROUP_NAME}|" roles/role_definition_1-template.json >  roles/role_definition_1.json
       set -x
       az role definition create --role-definition @roles/role_definition_1.json
+
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def1 Cloudera Management Console Azure Operator For Single Resource Group" \
       --scopes /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
+
       set +x
       ;;
     def2)
@@ -494,9 +589,11 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator for Single Resource Group|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def2 Cloudera Management Console Azure Operator for Single Resource Group|" -e "s|{SUBSCRIPTION-ID}|${SUBSCRIPTION_ID}|" -e "s|{RESOURCE-GROUP-NAME}|${RESOURCE_GROUP_NAME}|" roles/role_definition_2-template.json >  roles/role_definition_2.json
       set -x
       az role definition create --role-definition @roles/role_definition_2.json
+
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def2 Cloudera Management Console Azure Operator for Single Resource Group" \
       --scopes /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
+
       set +x
       ;;
     def3)
@@ -504,9 +601,11 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def3 Cloudera Management Console Azure Operator|" -e "s|{SUBSCRIPTION-ID}|${SUBSCRIPTION_ID}|" roles/role_definition_3-template.json > roles/role_definition_3.json
       set -x
       az role definition create --role-definition @roles/role_definition_3.json
+
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def3 Cloudera Management Console Azure Operator" \
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
+
       set +x
       ;;
     contributor)
@@ -516,6 +615,7 @@ function az_create_custom_role_app_registration ()
       --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role Contributor \
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
+
       set +x
       ;;
     *)
@@ -535,11 +635,6 @@ function do_create_cdp_credential ()
   APP_PASSWORD=$(jq -r '.password' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out)
   APP_TENANT=$(jq -r '.tenant' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out)
   
-  echo -e "Save this app-registration information in a secure location.
-  This is the only time that the secret access key can be viewed. 
-  You will not be able to retrieve this app-registration password after this step.\n
-  $(cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out)\n"
-
   cat > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json <<EOF
   {
     "credentialName": "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred",
@@ -553,6 +648,11 @@ function do_create_cdp_credential ()
     "description": "${PREFIX}-${RESOURCE_GROUP_NAME} Credential for Azure"
   }
 EOF
+
+  echo -e "Save this app-registration information in a secure location.
+  This is the only time that the secret access key can be viewed. 
+  You will not be able to retrieve this app-registration password after this step.\n
+  $(cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out)\n"
 
   set -x
   cdp environments create-azure-credential --cli-input-json "$(cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json)"
@@ -595,7 +695,7 @@ function do_create_cdp_az_env ()
     # Latest FreeIPA image with Service EndPoints & Public IPs
       set -x
       cdp environments create-azure-environment \
-        --environment-name ${PREFIX}-env \
+        --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
         --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
@@ -610,15 +710,15 @@ function do_create_cdp_az_env ()
         --security-access defaultSecurityGroupId=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-default-nsg,securityGroupIdForKnox=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-knox-nsg \
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
-        --tags ${CUSTOM_TAGS} \
-        --description "${ENV_DESCRIPTION}"
+        --description "${ENV_DESCRIPTION}" \
+        --tags "${CUSTOM_TAGS}"
       set +x
       ;;
     freeipa-pep-no-custom-img)
     # Latest FreeIPA image with Private EndPoints & Public IPs
       set -x
       cdp environments create-azure-environment \
-        --environment-name ${PREFIX}-env \
+        --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
         --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
@@ -633,15 +733,15 @@ function do_create_cdp_az_env ()
         --security-access defaultSecurityGroupId=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-default-nsg,securityGroupIdForKnox=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-knox-nsg \
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
-        --tags ${CUSTOM_TAGS} \
-        --description "${ENV_DESCRIPTION}"
+        --description "${ENV_DESCRIPTION}" \
+        --tags "${CUSTOM_TAGS}"
       set +x
       ;;
     freeipa-no-custom-img-priv)
     # Latest FreeIPA image with Service EndPoints & Private IPs
       set -x
       cdp environments create-azure-environment \
-        --environment-name ${PREFIX}-env \
+        --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
         --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
@@ -656,15 +756,15 @@ function do_create_cdp_az_env ()
         --security-access defaultSecurityGroupId=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-default-nsg,securityGroupIdForKnox=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-knox-nsg \
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
-        --tags ${CUSTOM_TAGS} \
-        --description "${ENV_DESCRIPTION}"
+        --description "${ENV_DESCRIPTION}" \
+        --tags "${CUSTOM_TAGS}"
       set +x
       ;;
     freeipa-pep-no-custom-img-priv)
     # Latest FreeIPA image with Private EndPoints & Private IPs
       set -x
       cdp environments create-azure-environment \
-        --environment-name ${PREFIX}-env \
+        --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
         --credential-name "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred" \
         --region "${LOCATION}" \
         --resource-group-name ${RESOURCE_GROUP_NAME} \
@@ -679,8 +779,8 @@ function do_create_cdp_az_env ()
         --security-access defaultSecurityGroupId=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-default-nsg,securityGroupIdForKnox=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.Network/networkSecurityGroups/${VNET_NAME}-knox-nsg \
         --public-key "${PUBLIC_KEY}" \
         --log-storage storageLocationBase=abfs://${LOGS_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net,managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${LOGGER_IDENTITY},backupStorageLocationBase=abfs://${BACKUP_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
-        --tags ${CUSTOM_TAGS} \
-        --description "${ENV_DESCRIPTION}"
+        --description "${ENV_DESCRIPTION}" \
+        --tags "${CUSTOM_TAGS}"
       set +x
       ;;
     *) 
@@ -698,7 +798,7 @@ function do_create_cdp_sdx ()
       # iDBroker mappings with RAZ
       set -x
       cdp environments set-id-broker-mappings \
-      --environment-name ${PREFIX}-env \
+      --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
       --data-access-role /subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${ADMIN_IDENTITY} \
       --ranger-audit-role /subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${RANGER_AUDIT_LOGGER_IDENTITY} \
       --ranger-cloud-access-authorizer-role /subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${RANGER_RAZ_IDENTITY} \
@@ -706,32 +806,32 @@ function do_create_cdp_sdx ()
 
       # Create the Data Lake with RAZ
       cdp datalake create-azure-datalake \
-      --datalake-name ${PREFIX}-dl \
-      --environment-name ${PREFIX}-env \
+      --datalake-name ${PREFIX}-${SEQ_NUMBER}-dl \
+      --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
       --cloud-provider-configuration managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${ASSUMER_IDENTITY},storageLocation=abfs://${STORAGE_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
-      --tags ${CUSTOM_TAGS} \
       --scale ${DL_SCALE} \
       --enable-ranger-raz \
-      --runtime ${RUN_TIME}  
+      --runtime ${RUN_TIME} \
+      --tags "${CUSTOM_TAGS}"
       set +x
       ;;
     no-raz-runtime)
       # idbroker mappings without RAZ
       set -x
       cdp environments set-id-broker-mappings \
-      --environment-name ${PREFIX}-env \
+      --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
       --data-access-role /subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${ADMIN_IDENTITY} \
       --ranger-audit-role /subscriptions/${SUBSCRIPTION_ID}/resourcegroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${RANGER_AUDIT_LOGGER_IDENTITY} \
       --set-empty-mappings
       
       # Create the Data Lake without RAZ
       cdp datalake create-azure-datalake \
-      --datalake-name ${PREFIX}-dl \
-      --environment-name ${PREFIX}-env \
+      --datalake-name ${PREFIX}-${SEQ_NUMBER}-dl \
+      --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
       --cloud-provider-configuration managedIdentity=/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${ASSUMER_IDENTITY},storageLocation=abfs://${STORAGE_LOCATION_BASE}@${STORAGE_ACCOUNT_NAME}.dfs.core.windows.net \
-      --tags ${CUSTOM_TAGS} \
       --scale ${DL_SCALE} \
-      --runtime ${RUN_TIME}    
+      --runtime ${RUN_TIME} \
+      --tags "${CUSTOM_TAGS}"
       set +x
       ;;
     *) echo "USAGE: $0 'raz-runtime|no-raz-runtime'"
@@ -871,7 +971,7 @@ function do_create_dh_default_cluster ()
   set -x
   cdp datahub create-azure-cluster \
   --cluster-name ${DH_CLUSTER_NAME} \
-  --environment-name ${PREFIX}-env \
+  --environment-name ${PREFIX}-${SEQ_NUMBER}-env \
   --cluster-template-name "${DH_DEFAULT_TEMPLATE}" \
   --cluster-definition-name "${DH_DEFINITION_TEMPLATE}" \
   --tags "${CUSTOM_TAGS}"
