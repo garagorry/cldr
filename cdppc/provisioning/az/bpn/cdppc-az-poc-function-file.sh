@@ -621,7 +621,8 @@ function az_create_custom_role_app_registration ()
     *)
       echo -e "Usage: ${0} 'default|minimal|def1|def2|def3|contributor'"
       ;;
-  esac  
+  esac
+ # dos2unix /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out  
 }
 # az_create_custom_role_app_registration  "${RESOURCE_GROUP_NAME}" ${PREFIX} "${SUBSCRIPTION_ID}" "default|minimal|def1|def2|def3|contributor"
 
@@ -648,8 +649,9 @@ function do_create_cdp_credential ()
     "description": "${PREFIX}-${RESOURCE_GROUP_NAME} Credential for Azure"
   }
 EOF
+  dos2unix /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json
 
-  echo -e "Save this app-registration information in a secure location.
+  echo -e "\nSave this app-registration information in a secure location.
   This is the only time that the secret access key can be viewed. 
   You will not be able to retrieve this app-registration password after this step.\n
   $(cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out)\n"
