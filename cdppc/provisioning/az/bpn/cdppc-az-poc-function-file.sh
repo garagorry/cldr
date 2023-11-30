@@ -95,8 +95,6 @@ function az_create_vnet_subnets ()
 
 function az_create_az_nsg ()
 {
-  # vnetname-default-nsg
-  # vnetname-knox-nsg
     RESOURCE_GROUP_NAME=$1
     VNET_NAME=$2
     LOCATION=$3
@@ -554,10 +552,14 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-default Cloudera Management Console Azure Operator|" -e "s|{subscriptionId}|${SUBSCRIPTION_ID}|" roles/default-template.json > roles/default.json
       set -x
       az role definition create --role-definition @roles/default.json
+      set +x
+      
+      sleep 30
+
+      set -x
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-default Cloudera Management Console Azure Operator" \
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
-
       set +x
       ;;
     minimal)
@@ -565,11 +567,14 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-minimal Cloudera Management Console Azure Operator|" -e "s|{subscriptionId}|${SUBSCRIPTION_ID}|" roles/minimal-template.json > roles/minimal.json
       set -x
       az role definition create --role-definition @roles/minimal.json
+      set +x
+      
+      sleep 30
 
+      set -x
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-minimal Cloudera Management Console Azure Operator" \
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
-
       set +x
       ;;
     def1)
@@ -577,11 +582,14 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator For Single Resource Group|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def1 Cloudera Management Console Azure Operator For Single Resource Group|" -e "s|{SUBSCRIPTION-ID}|${SUBSCRIPTION_ID}|" -e "s|{RESOURCE-GROUP-NAME}|${RESOURCE_GROUP_NAME}|" roles/role_definition_1-template.json >  roles/role_definition_1.json
       set -x
       az role definition create --role-definition @roles/role_definition_1.json
+      set +x
+      
+      sleep 30
 
+      set -x
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def1 Cloudera Management Console Azure Operator For Single Resource Group" \
       --scopes /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
-
       set +x
       ;;
     def2)
@@ -589,11 +597,14 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator for Single Resource Group|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def2 Cloudera Management Console Azure Operator for Single Resource Group|" -e "s|{SUBSCRIPTION-ID}|${SUBSCRIPTION_ID}|" -e "s|{RESOURCE-GROUP-NAME}|${RESOURCE_GROUP_NAME}|" roles/role_definition_2-template.json >  roles/role_definition_2.json
       set -x
       az role definition create --role-definition @roles/role_definition_2.json
+      set +x
+      
+      sleep 30
 
-      az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
+      set -x
+      az ad sp create-for-rbac --name "http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app" \
       --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def2 Cloudera Management Console Azure Operator for Single Resource Group" \
-      --scopes /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
-
+      --scopes "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP_NAME}" > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
       set +x
       ;;
     def3)
@@ -601,11 +612,14 @@ function az_create_custom_role_app_registration ()
       sed -e "s|Cloudera Management Console Azure Operator|${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def3 Cloudera Management Console Azure Operator|" -e "s|{SUBSCRIPTION-ID}|${SUBSCRIPTION_ID}|" roles/role_definition_3-template.json > roles/role_definition_3.json
       set -x
       az role definition create --role-definition @roles/role_definition_3.json
+      set +x
+      
+      sleep 30
 
+      set -x
       az ad sp create-for-rbac --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
-      --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def3 Cloudera Management Console Azure Operator" \
+      --role "${PREFIX}-${RESOURCE_GROUP_NAME}-custom-def3 Cloudera Management Console Azure Operator"\
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
-
       set +x
       ;;
     contributor)
@@ -615,7 +629,6 @@ function az_create_custom_role_app_registration ()
       --name http://${PREFIX}-${RESOURCE_GROUP_NAME}-az-app \
       --role Contributor \
       --scopes /subscriptions/${SUBSCRIPTION_ID} > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
-
       set +x
       ;;
     *)
@@ -637,27 +650,27 @@ function do_create_cdp_credential ()
   APP_TENANT=$(jq -r '.tenant' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out)
   
   cat > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json <<EOF
-  {
-    "credentialName": "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred",
-    "appBased": {
-        "authenticationType": "SECRET",
-        "applicationId": "${APP_ID}",
-        "secretKey": "${APP_PASSWORD}"
-    },
-    "subscriptionId": "${SUBSCRIPTION_ID}",
-    "tenantId": "${APP_TENANT}",
-    "description": "${PREFIX}-${RESOURCE_GROUP_NAME} Credential for Azure"
-  }
+{
+  "credentialName": "${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred",
+  "appBased": {
+    "authenticationType": "SECRET",
+    "applicationId": "${APP_ID}",
+    "secretKey": "${APP_PASSWORD}"
+  },
+  "subscriptionId": "${SUBSCRIPTION_ID}",
+  "tenantId": "${APP_TENANT}",
+  "description": "${PREFIX}-${RESOURCE_GROUP_NAME} Credential for Azure"
+}
 EOF
-  dos2unix /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json
+
+  dos2unix /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json >/dev/null 2>&1
 
   echo -e "\nSave this app-registration information in a secure location.
   This is the only time that the secret access key can be viewed. 
-  You will not be able to retrieve this app-registration password after this step.\n
-  $(cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out)\n"
+  You will not be able to retrieve this app-registration password after this step.\n"
 
   set -x
-  cdp environments create-azure-credential --cli-input-json "$(cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json)"
+  cdp environments create-azure-credential --cli-input-json "$(jq . /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred-for-rbac.json)"
   set +x
   rm -rf /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-az-create-for-rbac.out
 }
