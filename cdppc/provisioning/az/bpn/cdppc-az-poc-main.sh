@@ -197,7 +197,20 @@ EOF
     do_create_dh_default_cluster "${PREFIX}" "${DEFAULT_DH_TEMPLATE_CHOOSEN}" "${DEFAULT_DH_DEFINITION_CHOOSEN}" "${CUSTOM_TAGS}"
     ;;    
   *)
-    echo "The value of \${2} should be one of the following: 'pre | cred | tags | az_tags | sep | pep | freeipa-no-custom-img | freeipa-pep-no-custom-img | freeipa-no-custom-img-priv | freeipa-pep-no-custom-img-priv | dl-raz-runtime | dl-no-raz-runtime | dh-runtime'"
+    echo -e "\nThe value of \${2} should be one of the following:\n 
+    'pre' to create the pre-requisites
+    'cred' to create the credential using a role definition
+    'tags' to get the tags used for CDP deployment
+    'az_tags' to get the tags for Azure resources
+    'sep' to enable service endpoints when you are not using private endpoints
+    'pep' to create Postgres/dfs private DNS zone and required private endpoint for DFS cloud storage
+    'freeipa-no-custom-img' to create an environment using latest versions, Public IPs and service endpoints
+    'freeipa-pep-no-custom-img' to create an environment using latest versions, Public IPs and private endpoints
+    'freeipa-no-custom-img-priv' to create an environment using latest versions, Private IPs and service endpoints
+    'freeipa-pep-no-custom-img-priv' to create an environment using latest versions, Private IPs and private endpoints
+    'dl-raz-runtime' to create a Data Lake using RAZ
+    'dl-no-raz-runtime' to create a Data Lake without RAZ
+    'dh-runtime' to create a default Datahub template \n"
     exit 54
     ;;
   esac
