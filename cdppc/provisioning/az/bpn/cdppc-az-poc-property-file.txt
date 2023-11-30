@@ -42,7 +42,7 @@ export CDP_CREATOR=csso_rochar
 export PREFIX=bpnprd
 
 ## Resource Group
-export RESOURCE_GROUP_NAME="rg-bigdata-${PREFIX}-${SEQ_NUMBER}"
+export RESOURCE_GROUP_NAME="rg-bigdata"
 ## Azure built-in roles
 # https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
 # Storage Blob Delegator
