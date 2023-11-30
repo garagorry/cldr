@@ -130,7 +130,7 @@ EOF
     ;;
   cred)
     echo -e "\nCreating CDP Azure Credential ${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred\n"
-    do_activate_cdp_cli std
+    do_activate_cdp_cli std >/dev/null 2>&1
     az_create_custom_role_app_registration  "${RESOURCE_GROUP_NAME}" ${PREFIX} "${SUBSCRIPTION_ID}" "${ROLE_DEFINITION}"
     do_create_cdp_credential ${PREFIX} ${SUBSCRIPTION_ID}
     ;;
