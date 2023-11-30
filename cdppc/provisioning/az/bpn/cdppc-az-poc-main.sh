@@ -141,8 +141,7 @@ EOF
   az_tags)
     echo -e "\nPreparing Azure CLI Shorthand Syntax for: \n${CUSTOM_TAGS}\n"
     echo -e "Azure CLI Shorthand Syntax \n$(az_flatten_tags "${CUSTOM_TAGS}")\n"
-    # RESOURCE_GROUP_NAME_ID=$(az group show -n jdga8 --query id --output tsv)
-    # az tag create --resource-id ${RESOURCE_GROUP_NAME_ID} --tags 
+    # RESOURCE_GROUP_NAME_ID=$(az group show -n ${RESOURCE_GROUP_NAME} --query id --output tsv)
     # jq  '.tags[] | "\(.key)=\(.value)"' /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json | sed 's|=|\"=\"|' | sed "s|^|az tag update --resource-id ${RESOURCE_GROUP_NAME_ID} --operation Merge --tags |" | bash 
     ;;
   sep)
