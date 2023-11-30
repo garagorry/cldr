@@ -136,7 +136,7 @@ EOF
     ;;
   tags)
     echo -e "\nPreparing CDP CLI Shorthand Syntax for: \n${CUSTOM_TAGS}\n"
-    echo -e "CDP CLI Shorthand Syntax \n--tags $(flatten_tags "${CUSTOM_TAGS}")\n"
+    echo -e "CDP CLI Shorthand Syntax \n--tags $(cdp_flatten_tags "${CUSTOM_TAGS}")\n"
     ;;
   az_tags)
     echo -e "\nPreparing Azure CLI Shorthand Syntax for: \n${CUSTOM_TAGS}\n"
