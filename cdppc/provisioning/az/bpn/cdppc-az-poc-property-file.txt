@@ -17,6 +17,7 @@
 #----------------#
 # CDP API ACCESS #
 #----------------#
+# Not required now. The script will create the credential ${PREFIX}-${RESOURCE_GROUP_NAME}-az-cred
 # To get the profile names
 # grep '^\[' ~/.cdp/credentials
 # export CDP_PROFILE=sandbox 
@@ -37,7 +38,7 @@ export PUBLIC_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCvG104Z15GbD5etVZjtz4UM
 export LOCATION="eastus"
 export SEQ_NUMBER=01
 export IDENTITES_PREFIX=azbigp001mid
-export CDP_CREATOR=jgaragorry
+export CDP_CREATOR=csso_rochar
 export PREFIX=bpnprd
 
 ## Resource Group
@@ -61,7 +62,7 @@ export AZURE_VM_CONTRIBUTOR_GUID="9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
 export AZURE_MANAGED_IDENTITY_OPERATOR_GUID="f1a07417-d97a-45cb-824c-7a7467783830"
 
 ## Storage Account
-export STORAGE_ACCOUNT_NAME="azbigp001sta${PREFIX}${SEQ_NUMBER}"
+export STORAGE_ACCOUNT_NAME="azbigp001sta"
 export STORAGE_ACCOUNT_SKU=Standard_RAGRS
 export STORAGE_ACCOUNT_KIND=StorageV2
 export STORAGE_ACCOUNT_CONTAINER_DATA=data
@@ -91,7 +92,7 @@ export SUBSCRIPTION_ID=$(az account show | jq -r .id)
 # 10.34.0.128/26	10.34.0.129	10.34.0.190	10.34.0.128	10.34.0.191
 # 10.34.0.192/26	10.34.0.193	10.34.0.254	10.34.0.192	10.34.0.255
 
-export VNET_NAME=azcomp004vnet-${PREFIX}-${SEQ_NUMBER}
+export VNET_NAME=azcomp004vnet
 export VNET_CIDR=10.34.0.0/24
 export SUBNET_CIDR="10.34.0.0/26 10.34.0.64/26 10.34.0.128/26"
 export SUBNET_PATTERN=cloudera
@@ -164,7 +165,6 @@ EOF
 cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json)"
 export CUSTOM_TAGS="$(echo ${TAGS} | jq -r '.tags')"
 # export CUSTOM_TAGS="key=owner,value=${CDP_CREATOR} key=dept,value=Sales-SE-Cloud key=project,value=${SEQ_NUMBER}"
-
 
 #-------------#
 # ENVIRONMENT #
