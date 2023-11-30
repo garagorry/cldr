@@ -14,7 +14,7 @@ This script will deploy an environment using the lastest version available.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y virtualenv unzip jq git
+sudo apt-get install -y virtualenv unzip jq git dos2unix
 ```
 
 - Create the virtualenv tree.
