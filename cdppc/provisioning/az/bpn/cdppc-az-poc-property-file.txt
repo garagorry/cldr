@@ -164,7 +164,6 @@ export TAGS="$(cat > /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json <<EOF
 EOF
 cat /tmp/${PREFIX}-${RESOURCE_GROUP_NAME}-tags.json)"
 export CUSTOM_TAGS="$(echo ${TAGS} | jq -r '.tags')"
-# export CUSTOM_TAGS="key=owner,value=${CDP_CREATOR} key=dept,value=Sales-SE-Cloud key=project,value=${SEQ_NUMBER}"
 
 #-------------#
 # ENVIRONMENT #
