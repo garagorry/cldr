@@ -64,7 +64,7 @@ source ~/.bash_profile
 - [Configuring CDP client](https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-configuring-cdp-client-with-the-api-access-key.html "Configuring CDP client")
 
 ```bash
-$ cdp configure
+cdp configure
 ```
 
 To create a new default configuration for CDP Public Cloud you need to provide the following inputs:
