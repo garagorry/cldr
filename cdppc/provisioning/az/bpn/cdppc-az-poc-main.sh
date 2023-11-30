@@ -31,7 +31,7 @@ if (( $# != 2 ))
 then
   echo -e "\nThe valid arguments are:
              For \$1 => default | minimal | def1 | def2 | def3 | contributor
-             For \$2 => pre | cred | freeipa-no-custom-img | freeipa-pep-no-custom-img | freeipa-no-custom-img-priv | freeipa-pep-no-custom-img-priv | dl-raz-runtime | dl-no-raz-runtime | dh-runtime
+             For \$2 => pre | cred | tags | az_tags | sep | pep | freeipa-no-custom-img | freeipa-pep-no-custom-img | freeipa-no-custom-img-priv | freeipa-pep-no-custom-img-priv | dl-raz-runtime | dl-no-raz-runtime | dh-runtime
             
            Example: ${0} def2 pre\n"
   exit 52
