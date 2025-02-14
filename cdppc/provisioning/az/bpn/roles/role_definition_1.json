@@ -1,5 +1,5 @@
 {
-    "Name": "jdga-01-custom-def1 Cloudera Management Console Azure Operator For Single Resource Group",
+    "Name": "bpnprd-rg-bigdata3-custom-def1 Cloudera Management Console Azure Operator For Single Resource Group",
     "IsCustom": true,
     "Description": "Can use Cloudera Management Console managed clusters and resources updated for single resource group.",
     "Actions": [
@@ -82,6 +82,6 @@
     ],
     "NotDataActions": [],
     "AssignableScopes": [
-        "/subscriptions/add825b2-c306-43b7-b0a0-ce307b5076ed/resourceGroups/jdga-01-cdp-rg"
+        "/subscriptions/add825b2-c306-43b7-b0a0-ce307b5076ed/resourceGroups/rg-bigdata3"
     ]
 }

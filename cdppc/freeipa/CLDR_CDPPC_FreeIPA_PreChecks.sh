@@ -899,7 +899,7 @@ salt '*' cmd.run '
     PRINCIPAL=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.admin_user') 
     PW=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
     echo ${PW} | kinit ${PRINCIPAL} >/dev/null 2>&1
-    ipa group-find --all | grep 'dn:' | md5sum
+    ipa user-find --all | grep 'dn:' | md5sum
 ' 2>/dev/null
 }
 

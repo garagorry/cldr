@@ -7,10 +7,9 @@
 # Access API DOC (STATIC)
 # https://<<CM_FQDN>>/static/apidocs/index.html
 #
-
 # Function: do_spin - Create the spinner for long running processes {{{1
 #-----------------------------------------------------------------------
-function do_spin () 
+function do_spin ()
 {
     spinner="/|\\-/|\\-"
     while :
@@ -138,5 +137,6 @@ function main ()
     do_get_client_configs
     echo -e "${RED}Client Configs:${NC}\n\n$(ls -lrth clientConfig*)\n"
 }
+set -x
 main
 exit 0
