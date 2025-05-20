@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+
+# Function: Check for required tools
+do_check_dependencies() {
+    local missing=0
+    for cmd in xmlstarlet jq curl; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "❌ Error: Required command '$cmd' is not installed."
+            missing=1
+        fi
+    done
+    if [[ $missing -eq 1 ]]; then
+        echo "🔧 Please install the missing packages and re-run the script."
+        echo "Example on RHEL: sudo dnf install xmlstarlet jq curl -y"
+        exit 1
+    fi
+}
+
+# Function: Spinner (optional)
+do_spin () {
+  spinner="/|\\-/|\\-"
+  while :
+  do
+    for i in $(seq 0 7); do
+      echo -n "${spinner:$i:1}"
+      echo -en "\010"
+      sleep 1
+    done
+  done
+}
+
+# Function: Check root user
+run_as_root_check () {
+    if [[ $(id -u) -ne 0 ]]; then
+        echo -e "❌ This script must be run as root. Please use: sudo -i"
+        exit 1
+    fi
+}
+
+# Function: Validate Cloudera credentials
+do_test_credentials () {
+    curl -s -L -k -u ${WORKLOAD_USER}:${WORKLOAD_USER_PASS} -X GET "${CM_SERVER}/api/version" > /tmp/null 2>&1
+    if grep -q "Bad credentials" /tmp/null; then
+        echo -e "\n❌ Invalid credentials. Please double-check."
+        rm -f /tmp/null
+        exit 1
+    fi
+    rm -f /tmp/null
+}
+
+# Helper: Check if property is sensitive
+is_sensitive_property() {
+    local prop="$1"
+    for keyword in password secret token key credential passphrase; do
+        if [[ "$prop" =~ $keyword ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Helper: Clean up AUTO_TLS references and escape quotes
+sanitize_value() {
+    local val="$1"
+    echo "$val" | sed 's/{{CM_AUTO_TLS}}/****/g' | tr -d '\n' | sed 's/"/""/g'
+}
+
+# Function: Fetch service and role config values and write to master CSV
+do_get_roles_configs () {
+    MASTER_CSV_FILE="${OUTPUT_DIR}/all_services_config.csv"
+    echo "type,service_or_role,property,value" > "$MASTER_CSV_FILE"
+
+    for CLUSTER_SERVICE_NAME in $(curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
+        -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services" \
+        | jq -r '.items[].name'); do
+
+        echo -e "\n=== Processing Service: ${CLUSTER_SERVICE_NAME} ==="
+
+        SERVICE_JSON_FILE="${OUTPUT_DIR}/ServiceConfigs/$(hostname -f)_${CM_CLUSTER_NAME}_${CLUSTER_SERVICE_NAME}_config.json"
+
+        # ---- SERVICE CONFIGS ----
+        curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
+            -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config?view=summary" \
+            | tee "$SERVICE_JSON_FILE" \
+            | jq -r '.items[] | "\(.name)=\(.value)"' \
+            | while IFS= read -r line; do
+                key="${line%%=*}"
+                val="${line#*=}"
+                val_cleaned=$(sanitize_value "$val")
+
+                if [[ "$val_cleaned" == \<property* ]]; then
+                    while IFS= read -r subline; do
+                        sub_key="${subline%%=*}"
+                        sub_val="${subline#*=}"
+                        is_sensitive_property "$sub_key" && sub_val="****"
+                        echo "service,${CLUSTER_SERVICE_NAME},${sub_key},\"${sub_val}\"" >> "$MASTER_CSV_FILE"
+                    done < <(echo "<configuration>${val_cleaned}</configuration>" \
+                        | xmlstarlet sel -t -m "//property" -v "concat(name,'=',value)" -n)
+                else
+                    is_sensitive_property "$key" && val_cleaned="****"
+                    echo "service,${CLUSTER_SERVICE_NAME},${key},\"${val_cleaned}\"" >> "$MASTER_CSV_FILE"
+                fi
+            done
+
+        # ---- ROLE CONFIG GROUPS ----
+        for ROLE in $(curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
+            -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups" \
+            | jq -r '.items[].name'); do
+
+            curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
+                -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups/${ROLE}/config?view=summary" \
+                | jq -r '.items[] | "\(.name)=\(.value)"' \
+                | while IFS= read -r line; do
+                    key="${line%%=*}"
+                    val="${line#*=}"
+                    val_cleaned=$(sanitize_value "$val")
+                    is_sensitive_property "$key" && val_cleaned="****"
+                    echo "role,${ROLE},${key},\"${val_cleaned}\"" >> "$MASTER_CSV_FILE"
+                done
+        done
+    done
+}
+
+# Function: Main
+main () {
+    run_as_root_check
+    do_check_dependencies
+    clear
+
+    read -p "What is your Workload username: " WORKLOAD_USER
+    echo -n "Enter your Workload user Password: "
+    unset WORKLOAD_USER_PASS
+    unset CHARTCOUNT
+
+    while IFS= read -r -n1 -s CHAR; do
+        case "${CHAR}" in
+        $'\0') break ;;
+        $'\177') # backspace
+            if [ ${#WORKLOAD_USER_PASS} -gt 0 ]; then
+                echo -ne "\b \b"
+                WORKLOAD_USER_PASS=${WORKLOAD_USER_PASS::-1}
+            fi ;;
+        *) echo -n '*' ; WORKLOAD_USER_PASS+="${CHAR}" ;;
+        esac
+    done
+    echo
+
+    export CM_SERVER_DB_FILE=/etc/cloudera-scm-server/db.properties
+    export CM_DB_HOST=$(awk -F"=" '/db.host/ {print $NF}' ${CM_SERVER_DB_FILE})
+    export CM_DB_NAME=$(awk -F"=" '/db.name/ {print $NF}' ${CM_SERVER_DB_FILE})
+    export CM_DB_USER=$(awk -F"=" '/db.user/ {print $NF}' ${CM_SERVER_DB_FILE})
+    export PGPASSWORD=$(awk -F"=" '/db.password/ {print $NF}' ${CM_SERVER_DB_FILE})
+
+    export CM_CLUSTER_NAME=$(echo -e "SELECT name FROM clusters;" \
+        | psql -h ${CM_DB_HOST} -U ${CM_DB_USER} -d ${CM_DB_NAME} \
+        | grep -v Proxy | tail -n 3 | head -n1 | sed 's| ||g')
+
+    export CM_SERVER="https://$(hostname -f):7183"
+    export OUTPUT_DIR=/tmp/$(hostname -f)/$(date +"%Y%m%d%H%M%S")
+
+    do_test_credentials
+    export CM_API_VERSION=$(curl -s -L -k -u ${WORKLOAD_USER}:${WORKLOAD_USER_PASS} \
+        -X GET "${CM_SERVER}/api/version")
+
+    mkdir -p ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups}
+
+    do_get_roles_configs
+}
+
+# Start
+ps -eo pid,user,command | grep $(systemctl status cloudera-scm-server | awk '/Main PID:/ {print $3}') \
+    | grep -v "grep" | grep 'com.cloudera.api.redaction' >/dev/null 2>&1
+
+if [[ $? -eq 0 ]]; then
+    main
+    echo -e "\n🎯 Output directory: ${OUTPUT_DIR}"
+    echo "📦 Compressing..."
+    tar czf "${OUTPUT_DIR}/ServiceConfigs_roleConfigGroups_$(date +"%Y%m%d%H%M%S").tgz" \
+        -C "${OUTPUT_DIR}" ServiceConfigs roleConfigGroups all_services_config.csv
+    echo -e "\n✅ Bundle ready:"
+    ls -lh "${OUTPUT_DIR}/ServiceConfigs_roleConfigGroups_"*.tgz
+else
+    echo -e "🚫 Cloudera API redaction is enabled. Please disable it:\n"
+    cat <<EOF
+1. Backup and edit: /etc/default/cloudera-scm-server
+2. Add to CMF_JAVA_OPTS:
+   -Dcom.cloudera.api.redaction=false
+3. Restart Cloudera Manager:
+   systemctl restart cloudera-scm-server
+4. Rerun this script.
+EOF
+    exit 1
+fi
