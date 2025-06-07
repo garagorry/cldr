@@ -5,11 +5,16 @@ set -euo pipefail
 # === Defaults ===
 CLDR_BASE_FOLDER="/hadoopfs/fs1/CLDR/"
 COMPRESS=true
+ESTIMATE_SIZE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-compress)
       COMPRESS=false
+      shift
+      ;;
+    --estimate-size)
+      ESTIMATE_SIZE=true
       shift
       ;;
     --base-folder)
@@ -18,7 +23,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "❌ Unknown option: $1"
-      echo "Usage: $0 [--no-compress] [--base-folder <path>]"
+      echo "Usage: $0 [--no-compress] [--estimate-size] [--base-folder <path>]"
       exit 1
       ;;
   esac
@@ -29,9 +34,11 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-mkdir -p "${CLDR_BASE_FOLDER}/BACKUP"
+# === Timestamped Backup Folder ===
 TIMESTAMP=$(date +'%Y%m%d%H%M%S')
-LOG_FILE="${CLDR_BASE_FOLDER}/BACKUP/cm_db_backup_${TIMESTAMP}.log"
+BACKUP_DIR="${CLDR_BASE_FOLDER}/BACKUP/${TIMESTAMP}"
+mkdir -p "$BACKUP_DIR"
+LOG_FILE="${BACKUP_DIR}/cm_db_backup_${TIMESTAMP}.log"
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
@@ -63,7 +70,6 @@ check_postgres_running() {
       exit 1
     fi
   else
-    # Remote DB host: test with nc or bash TCP
     if command -v nc &>/dev/null; then
       if ! nc -z -w 3 "$CM_DB_HOST" 5432; then
         log "❌ Cannot reach PostgreSQL on $CM_DB_HOST:5432 (nc failed). Exiting."
@@ -80,25 +86,41 @@ check_postgres_running() {
   log "✅ PostgreSQL is reachable on $CM_DB_HOST"
 }
 
+estimate_size() {
+  log "📊 Estimating size of Cloudera Manager PostgreSQL database..."
+  SIZE_BYTES=$(psql -h "$CM_DB_HOST" -U "$CM_DB_USER" -d "$CM_DB_NAME" -t -c "SELECT pg_database_size('$CM_DB_NAME');" | tr -d '[:space:]')
+  if [[ -z "$SIZE_BYTES" || ! "$SIZE_BYTES" =~ ^[0-9]+$ ]]; then
+    log "❌ Failed to estimate database size"
+    exit 1
+  fi
+  SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+  log "📐 Estimated DB Size: $SIZE_MB MB"
+  if $COMPRESS; then
+    ESTIMATED_COMPRESSED_MB=$(echo "scale=2; $SIZE_MB * 0.3" | bc)
+    log "📉 Estimated Compressed Size (~30%): $ESTIMATED_COMPRESSED_MB MB"
+  fi
+}
+
 run_backup() {
   log "🚀 Starting Cloudera Manager DB backup"
   log "Base folder: $CLDR_BASE_FOLDER"
   log "Compression enabled: $COMPRESS"
+  log "Backup path: $BACKUP_DIR"
 
   # === Plain text dump ===
-  PLAIN_DUMP="${CLDR_BASE_FOLDER}/BACKUP/${CM_DB_NAME}_${TIMESTAMP}_plain"
+  PLAIN_DUMP="${BACKUP_DIR}/${CM_DB_NAME}_${TIMESTAMP}_plain"
   log "📦 Dumping plain text to $PLAIN_DUMP"
   pg_dump --host="$CM_DB_HOST" --username="$CM_DB_USER" --dbname="$CM_DB_NAME" --format=plain --file="$PLAIN_DUMP" 2>>"$LOG_FILE"
   if $COMPRESS; then gzip "$PLAIN_DUMP" && log "🗜 Compressed to ${PLAIN_DUMP}.gz"; fi
 
   # === Schema-only dump ===
-  SCHEMA_DUMP="${CLDR_BASE_FOLDER}/BACKUP/${CM_DB_NAME}_${TIMESTAMP}_schema.sql"
+  SCHEMA_DUMP="${BACKUP_DIR}/${CM_DB_NAME}_${TIMESTAMP}_schema.sql"
   log "📦 Dumping schema to $SCHEMA_DUMP"
   pg_dump --host="$CM_DB_HOST" --username="$CM_DB_USER" --schema-only --no-owner --no-privileges --file="$SCHEMA_DUMP" 2>>"$LOG_FILE"
   if $COMPRESS; then gzip "$SCHEMA_DUMP" && log "🗜 Compressed to ${SCHEMA_DUMP}.gz"; fi
 
   # === Full binary dump ===
-  FULL_DUMP="${CLDR_BASE_FOLDER}/BACKUP/${CM_DB_NAME}_${TIMESTAMP}_full_binary"
+  FULL_DUMP="${BACKUP_DIR}/${CM_DB_NAME}_${TIMESTAMP}_full_binary"
   log "📦 Dumping binary format to $FULL_DUMP"
   pg_dump --host="$CM_DB_HOST" --username="$CM_DB_USER" --dbname="$CM_DB_NAME" -F c --no-owner --no-privileges --verbose --file="$FULL_DUMP" 2>>"$LOG_FILE"
   if $COMPRESS; then gzip "$FULL_DUMP" && log "🗜 Compressed to ${FULL_DUMP}.gz"; fi
@@ -106,6 +128,12 @@ run_backup() {
   log "✅ Backup completed successfully."
 }
 
+# === Main ===
 get_db_params
 check_postgres_running
-run_backup
+
+if $ESTIMATE_SIZE; then
+  estimate_size
+else
+  run_backup
+fi
