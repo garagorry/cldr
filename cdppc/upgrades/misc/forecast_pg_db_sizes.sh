@@ -6,6 +6,34 @@ PILLAR_FILE="/srv/pillar/postgresql/postgre.sls"
 DEFAULT_PORT=5432
 COMPRESSION_RATIO=0.7  # Assume 30% compression typical for text-based dumps
 
+usage() {
+  cat <<EOF
+Usage: $0 [--help]
+
+This script forecasts the sizes of PostgreSQL databases defined in the Cloudera
+pillar file at $PILLAR_FILE by querying each database's size remotely.
+
+Requirements:
+  - Must be run as root on a node where Cloudera Manager is running.
+  - Requires 'jq' and 'psql' commands available in PATH.
+  - Assumes databases allow remote connections using credentials from the pillar file.
+
+Options:
+  --help      Show this help message and exit
+
+EOF
+}
+
+if [[ "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $EUID -ne 0 ]]; then
+  echo "❌ This script must be run as root. Exiting."
+  exit 1
+fi
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
