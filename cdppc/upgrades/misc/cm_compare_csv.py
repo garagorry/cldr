@@ -121,7 +121,7 @@ def compare_files_and_output_csv(old_file, new_file, modified_file, added_file, 
 
 def main():
     if len(sys.argv) != 6:
-        print("❌ Usage: python compare_csv.py <old_file.csv> <new_file.csv> <modified_file.csv> <added_file.csv> <removed_file.csv>")
+        print("❌ Usage: python cm_compare_csv.py <old_file.csv> <new_file.csv> <modified_file.csv> <added_file.csv> <removed_file.csv>")
         sys.exit(1)
 
     old_file, new_file, modified_file, added_file, removed_file = sys.argv[1:]

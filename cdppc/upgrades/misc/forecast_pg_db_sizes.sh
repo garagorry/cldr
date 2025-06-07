@@ -5,38 +5,52 @@ set -euo pipefail
 PILLAR_FILE="/srv/pillar/postgresql/postgre.sls"
 DEFAULT_PORT=5432
 COMPRESSION_RATIO=0.7  # Assume 30% compression typical for text-based dumps
+USE_COMPRESSION=true
 
 usage() {
   cat <<EOF
-Usage: $0 [--help]
-
-This script forecasts the sizes of PostgreSQL databases defined in the Cloudera
-pillar file at $PILLAR_FILE by querying each database's size remotely.
-
-Requirements:
-  - Must be run as root on a node where Cloudera Manager is running.
-  - Requires 'jq' and 'psql' commands available in PATH.
-  - Assumes databases allow remote connections using credentials from the pillar file.
+Usage: $0 [--no-compress] [--help]
 
 Options:
-  --help      Show this help message and exit
+  --no-compress    Show raw database size without applying compression estimate.
+  --help           Show this help message and exit.
 
+Description:
+  This script forecasts PostgreSQL database sizes based on
+  live connection to the databases defined in the pillar file:
+  $PILLAR_FILE
+
+  Must be run as root on a Cloudera Manager node.
 EOF
 }
 
-if [[ "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-compress)
+      USE_COMPRESSION=false
+      shift
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "❌ Unknown option: $1"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
 
 if [[ $EUID -ne 0 ]]; then
   echo "❌ This script must be run as root. Exiting."
   exit 1
 fi
-
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-}
 
 # Check jq availability
 if ! command -v jq &>/dev/null; then
@@ -46,7 +60,7 @@ fi
 
 log "🔍 Extracting databases from pillar file: $PILLAR_FILE"
 
-# Read all database definitions from the JSON file
+# Read all database definitions from the JSON file, skipping first line if needed
 db_entries=$(sed -n '2,$p' "$PILLAR_FILE" | jq -r '
   .postgres | to_entries[]
   | select(.value | type == "object" and .database != null)
@@ -66,7 +80,6 @@ fi
 
 log "📊 Forecasting database sizes..."
 
-# Loop over each database entry
 echo "$db_entries" | jq -c '.' | while read -r db; do
   DB_NAME=$(echo "$db" | jq -r '.name')
   DB_USER=$(echo "$db" | jq -r '.user')
@@ -82,8 +95,13 @@ echo "$db_entries" | jq -c '.' | while read -r db; do
 
   if [[ "$size_bytes" =~ ^[0-9]+$ ]]; then
     size_mb=$(awk "BEGIN {printf \"%.2f\", $size_bytes / 1024 / 1024}")
-    est_compressed=$(awk "BEGIN {printf \"%.2f\", $size_mb * $COMPRESSION_RATIO}")
-    log "✅ $DB_NAME: ${size_mb} MB (estimated compressed: ${est_compressed} MB)"
+
+    if $USE_COMPRESSION; then
+      est_compressed=$(awk "BEGIN {printf \"%.2f\", $size_mb * $COMPRESSION_RATIO}")
+      log "✅ $DB_NAME: ${size_mb} MB (estimated compressed: ${est_compressed} MB)"
+    else
+      log "✅ $DB_NAME: ${size_mb} MB (raw size, no compression applied)"
+    fi
   else
     log "❌ Failed to retrieve size for $DB_NAME"
   fi
