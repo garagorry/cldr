@@ -1,22 +1,18 @@
 #!/bin/bash
 
-# Default target, no logging
-# ./ent_solr_health_check.sh
-
-# Custom Salt target (FQDN or regex)
-# ./ent_solr_health_check.sh -t 'core03.cloudera.site'
-
-# Enable logging
-# ./ent_solr_health_check.sh -l
-
-# Dry-run (just shows the Salt command)
-# ./ent_solr_health_check.sh -n
+# === Usage Examples ===
+# ./ent_solr_health_check.sh                      # Default target
+# ./ent_solr_health_check.sh -t '*core3*.cloudera.site'  # Custom target
+# ./ent_solr_health_check.sh -l                  # Enable logging
+# ./ent_solr_health_check.sh -n                  # Dry-run
 
 # === Configuration ===
 DEFAULT_TARGET='*core0*.cloudera.site'
 LOG_DIR="/var/log/solr_health_check"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="$LOG_DIR/solr_health_check_$TIMESTAMP.log"
+
+source activate_salt_env
 
 # === Helper Functions ===
 usage() {
@@ -48,6 +44,15 @@ while getopts ":t:ln" opt; do
     * ) usage ;;
   esac
 done
+
+# === Light Duty Detection Logic ===
+FQDN=$(hostname -f)
+if [[ "$FQDN" =~ -master0\..*\.cloudera\.site$ ]]; then
+  log_msg "🧭 Detected Light Duty Data Lake node: $FQDN"
+  SALT_TARGET="$FQDN"
+else
+  log_msg "�� Detected Enterprise Data Lake. Using target: $SALT_TARGET"
+fi
 
 # === Execution ===
 log_msg "🔍 Target: $SALT_TARGET"
