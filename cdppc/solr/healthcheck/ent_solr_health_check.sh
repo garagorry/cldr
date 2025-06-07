@@ -2,7 +2,7 @@
 
 # === Usage Examples ===
 # ./ent_solr_health_check.sh                      # Default target
-# ./ent_solr_health_check.sh -t '*core3*.cloudera.site'  # Custom target
+# ./ent_solr_health_check.sh -t 'core03.cloudera.site'  # Custom target
 # ./ent_solr_health_check.sh -l                  # Enable logging
 # ./ent_solr_health_check.sh -n                  # Dry-run
 
@@ -51,7 +51,7 @@ if [[ "$FQDN" =~ -master0\..*\.cloudera\.site$ ]]; then
   log_msg "🧭 Detected Light Duty Data Lake node: $FQDN"
   SALT_TARGET="$FQDN"
 else
-  log_msg "�� Detected Enterprise Data Lake. Using target: $SALT_TARGET"
+  log_msg "🏢 Detected Enterprise Data Lake. Using target: $SALT_TARGET"
 fi
 
 # === Execution ===
