@@ -35,6 +35,6 @@ the Privacy Policies of these sites as well as their "Terms of Service" before e
  3) Reload the Profile file using:
     source ~/.bashrc
  4) List the available functions using:
-    awk '/^function/ {print $2}' ~/.freeipa_functions
+    awk '/^function/ {print $2}' ~/.freeipa_status_functions.sh
  5) Execute a test by using the function name, for example:
     freeipa_cipa_state
