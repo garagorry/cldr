@@ -38,6 +38,39 @@ python3 hive_metastore_stats.py [-o OUTPUT_FILE]
 python3 hive_metastore_stats.py -o /tmp/hive_stats.json
 ```
 
+## Running from Cloudera Manager Node (Virtual Environment)
+
+To safely execute the script on the **Active Cloudera Manager node** without affecting the system Python, you can use a dedicated Python 3.11 virtual environment:
+
+```bash
+# Switch to root
+sudo -i
+
+# Create a virtual environment under the root user's home
+python3.11 -m venv ~/py3
+
+# Activate the environment
+source ~/py3/bin/activate
+
+# Upgrade pip and setup tools
+pip install --upgrade pip
+pip install --upgrade pip setuptools wheel
+
+# Install required package
+pip install psycopg2-binary
+
+# Create a scripts directory (optional)
+mkdir ~/scripts
+
+# Place the script in that directory
+vi ~/scripts/db_sql_validation.py
+
+# Run the script
+python3.11 ~/scripts/db_sql_validation.py
+```
+
+> 💡 You can also use `-o /tmp/output.json` to specify a custom path for the output file.
+
 ## Assumptions
 
 * The script reads connection parameters from the Salt pillar file located at:
