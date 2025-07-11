@@ -8,6 +8,12 @@ import argparse
 import os
 import sys
 import logging
+import time
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,6 +93,7 @@ QUERIES = {
 
 def run_queries(params):
     results = {}
+
     try:
         conn = psycopg2.connect(
             dbname=params['database'],
@@ -100,16 +107,27 @@ def run_queries(params):
         logging.error(str(e))
         sys.exit(1)
 
+    query_items = list(QUERIES.items())
+    total_start = time.perf_counter()
+
     with conn:
         with conn.cursor() as cur:
-            for name, query in QUERIES.items():
+            iterator = tqdm(query_items, desc="Running queries") if tqdm else query_items
+            for name, query in iterator:
                 logging.info(f"Running query: {name}")
+                start_time = time.perf_counter()
                 cur.execute(query)
                 rows = cur.fetchall()
+                elapsed = time.perf_counter() - start_time
+                logging.info(f"Query '{name}' completed in {elapsed:.2f} seconds")
                 columns = [desc[0] for desc in cur.description]
                 results[name] = [dict(zip(columns, row)) for row in rows]
 
     conn.close()
+
+    total_elapsed = time.perf_counter() - total_start
+    logging.info(f"All queries completed in {total_elapsed:.2f} seconds")
+
     return results
 
 def main():

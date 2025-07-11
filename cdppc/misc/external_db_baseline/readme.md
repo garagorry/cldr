@@ -20,7 +20,8 @@ This tool extracts summary statistics from a PostgreSQL-based Hive Metastore (e.
 
 ```bash
 pip install psycopg2-binary
-````
+pip install tqdm
+```
 
 ## Usage
 
@@ -30,7 +31,7 @@ python3 hive_metastore_stats.py [-o OUTPUT_FILE]
 
 ### Options
 
-* `-o`, `--output`: Path to save the JSON output. Defaults to `./hive_stats_<timestamp>.json`.
+- `-o`, `--output`: Path to save the JSON output. Defaults to `./hive_stats_<timestamp>.json`.
 
 ### Example
 
@@ -73,13 +74,13 @@ python3.11 ~/scripts/db_sql_validation.py
 
 ## Assumptions
 
-* The script reads connection parameters from the Salt pillar file located at:
+- The script reads connection parameters from the Salt pillar file located at:
 
   ```
   /srv/pillar/postgresql/postgre.sls
   ```
 
-* The file is expected to contain the following structure (example):
+- The file is expected to contain the following structure (example):
 
   ```yaml
   hive:
