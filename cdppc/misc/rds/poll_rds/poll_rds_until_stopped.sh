@@ -76,7 +76,7 @@ echo "------------------------------------------------------------"
 # Step 2: Polling loop
 while true; do
   STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
-    --query "DBInstances[0].DBInstanceStatus" --output text "${AWS_ARGS[@]}" 2>/dev/null)
+    --query "DBInstances[0].DBInstanceStatus" --output text 2>/dev/null)
 
   echo "[INFO] $(date '+%H:%M:%S') - Current RDS status: $STATUS"
 
