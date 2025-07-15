@@ -69,8 +69,6 @@ The following RPM packages are required for proper execution of the script and i
 - xz-libs-5.2.4-4.el8_6.x86_64.rpm
 - zlib-1.2.11-25.el8.x86_64.rpm
 
----
-
 ## Installing `xmlstarlet` on RHEL 8.x
 
 A full set of RPMs (including dependencies) can be downloaded and installed using the steps below:
