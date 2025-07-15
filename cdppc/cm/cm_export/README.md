@@ -32,20 +32,12 @@ This script exports **Cloudera Manager service and role configurations** into a 
 
 ## 🛠️ Prerequisites
 
-Ensure the following tools are installed:
-
-- `curl`
-- `jq`
-- `xmlstarlet`
-- `psql` (PostgreSQL client, for reading CM database)
-
-## Prerequisites
-
 The script must be executed on a Cloudera Manager host as `root`. It requires the following tools to be installed:
 
 - `curl`
 - `jq`
 - `xmlstarlet`
+- `psql` (PostgreSQL client, for reading CM database)
 
 The script depends on the `xmlstarlet` utility along with several essential system libraries. While these packages and their dependencies are planned to be included in the Cloudera On Cloud repository, you can manually download and install them from RPM packages as needed.
 
