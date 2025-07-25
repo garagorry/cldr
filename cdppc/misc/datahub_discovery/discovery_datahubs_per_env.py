@@ -253,8 +253,8 @@ def main():
                     cluster_dir / f"{output_prefix}_Template_{timestamp}.json"
                 )
 
-                # If USER_MANAGED, save the content separately using template name
-                if status == "USER_MANAGED" and content:
+                # Save the content separately for USER_MANAGED or DEFAULT templates
+                if status in ("USER_MANAGED", "DEFAULT") and content:
                     # Make filename-safe version of template name
                     safe_template_name = template_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
                     content_path = cluster_dir / f"{safe_template_name}_content.json"
