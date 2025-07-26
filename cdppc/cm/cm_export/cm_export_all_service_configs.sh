@@ -67,20 +67,49 @@ sanitize_value() {
 
 # Function: Fetch service and role config values and write to master CSV
 do_get_roles_configs () {
-    MASTER_CSV_FILE="${OUTPUT_DIR}/all_services_config.csv"
-    echo "type,service_or_role,property,value" > "$MASTER_CSV_FILE"
+    local timestamp=$(date +"%Y%m%d%H%M%S")
+    local DATAHUBNAME="${CM_CLUSTER_NAME:-datahub}"
+    local HOSTNAME_FQDN="$(hostname -f)"
+    # Use static API version v53 as per instruction
+    local API_VERSION="v53"
+
+    # Compose the new master CSV file name using the same convention as service/role configs
+    MASTER_CSV_FILE="${OUTPUT_DIR}/${HOSTNAME_FQDN}_${DATAHUBNAME}_all_services_config_${timestamp}.csv"
+    echo "type,service_or_role,property,value,api_uri" > "$MASTER_CSV_FILE"
+
+    # Subfolder for control files
+    CONTROL_SUBFOLDER="${OUTPUT_DIR}/api_control_files"
+    mkdir -p "${CONTROL_SUBFOLDER}/service_configs"
+    mkdir -p "${CONTROL_SUBFOLDER}/role_configs"
+
+    # Control files for GET and PUT (apply) calls
+    SERVICE_GET_CONTROL="${CONTROL_SUBFOLDER}/service_configs/get_service_config_calls.csv"
+    SERVICE_PUT_CONTROL="${CONTROL_SUBFOLDER}/service_configs/put_service_config_calls.csv"
+    ROLE_GET_CONTROL="${CONTROL_SUBFOLDER}/role_configs/get_role_config_calls.csv"
+    ROLE_PUT_CONTROL="${CONTROL_SUBFOLDER}/role_configs/put_role_config_calls.csv"
+
+    # Write headers if not present
+    [[ ! -f "$SERVICE_GET_CONTROL" ]] && echo "service_name,api_get_call" > "$SERVICE_GET_CONTROL"
+    [[ ! -f "$SERVICE_PUT_CONTROL" ]] && echo "service_name,property,api_put_call" > "$SERVICE_PUT_CONTROL"
+    [[ ! -f "$ROLE_GET_CONTROL" ]] && echo "service_name,role_name,api_get_call" > "$ROLE_GET_CONTROL"
+    [[ ! -f "$ROLE_PUT_CONTROL" ]] && echo "service_name,role_name,property,api_put_call" > "$ROLE_PUT_CONTROL"
 
     for CLUSTER_SERVICE_NAME in $(curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
-        -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services" \
+        -X GET "${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services" \
         | jq -r '.items[].name'); do
 
         echo -e "\n=== Processing Service: ${CLUSTER_SERVICE_NAME} ==="
 
-        SERVICE_JSON_FILE="${OUTPUT_DIR}/ServiceConfigs/$(hostname -f)_${CM_CLUSTER_NAME}_${CLUSTER_SERVICE_NAME}_config.json"
+        SERVICE_JSON_FILE="${OUTPUT_DIR}/ServiceConfigs/${HOSTNAME_FQDN}_${CM_CLUSTER_NAME}_${CLUSTER_SERVICE_NAME}_config.json"
+        SERVICE_API_URI="${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config?view=summary"
+
+        # Write GET API call for service config
+        SERVICE_GET_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X GET \"${SERVICE_API_URI}\""
+        echo "${CLUSTER_SERVICE_NAME},${SERVICE_GET_CMD}" >> "$SERVICE_GET_CONTROL"
 
         # ---- SERVICE CONFIGS ----
         curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
-            -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config?view=summary" \
+            -X GET "$SERVICE_API_URI" \
             | tee "$SERVICE_JSON_FILE" \
             | jq -r '.items[] | "\(.name)=\(.value)"' \
             | while IFS= read -r line; do
@@ -93,32 +122,54 @@ do_get_roles_configs () {
                         sub_key="${subline%%=*}"
                         sub_val="${subline#*=}"
                         is_sensitive_property "$sub_key" && sub_val="****"
-                        echo "service,${CLUSTER_SERVICE_NAME},${sub_key},\"${sub_val}\"" >> "$MASTER_CSV_FILE"
+                        echo "service,${CLUSTER_SERVICE_NAME},${sub_key},\"${sub_val}\",\"${SERVICE_API_URI}\"" >> "$MASTER_CSV_FILE"
+                        # Write PUT API call for service config property
+                        SERVICE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config\" -H 'content-type:application/json' -d '{\"items\":[{\"name\":\"${sub_key}\",\"value\":\"${sub_val}\"}]}'"
+                        echo "${CLUSTER_SERVICE_NAME},${sub_key},${SERVICE_PUT_CMD}" >> "$SERVICE_PUT_CONTROL"
                     done < <(echo "<configuration>${val_cleaned}</configuration>" \
                         | xmlstarlet sel -t -m "//property" -v "concat(name,'=',value)" -n)
                 else
                     is_sensitive_property "$key" && val_cleaned="****"
-                    echo "service,${CLUSTER_SERVICE_NAME},${key},\"${val_cleaned}\"" >> "$MASTER_CSV_FILE"
+                    echo "service,${CLUSTER_SERVICE_NAME},${key},\"${val_cleaned}\",\"${SERVICE_API_URI}\"" >> "$MASTER_CSV_FILE"
+                    # Write PUT API call for service config property
+                    SERVICE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config\" -H 'content-type:application/json' -d '{\"items\":[{\"name\":\"${key}\",\"value\":\"${val_cleaned}\"}]}'"
+                    echo "${CLUSTER_SERVICE_NAME},${key},${SERVICE_PUT_CMD}" >> "$SERVICE_PUT_CONTROL"
                 fi
             done
 
         # ---- ROLE CONFIG GROUPS ----
         for ROLE in $(curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
-            -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups" \
+            -X GET "${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups" \
             | jq -r '.items[].name'); do
 
+            ROLE_JSON_FILE="${OUTPUT_DIR}/roleConfigGroups/${HOSTNAME_FQDN}_${CM_CLUSTER_NAME}_${CLUSTER_SERVICE_NAME}_${ROLE}_config.json"
+            ROLE_API_URI="${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups/${ROLE}/config?view=summary"
+            ROLE_GET_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X GET \"${ROLE_API_URI}\""
+            echo "${CLUSTER_SERVICE_NAME},${ROLE},${ROLE_GET_CMD}" >> "$ROLE_GET_CONTROL"
+
             curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
-                -X GET "${CM_SERVER}/api/${CM_API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups/${ROLE}/config?view=summary" \
+                -X GET "$ROLE_API_URI" \
+                | tee -a "$ROLE_JSON_FILE" \
                 | jq -r '.items[] | "\(.name)=\(.value)"' \
                 | while IFS= read -r line; do
                     key="${line%%=*}"
                     val="${line#*=}"
                     val_cleaned=$(sanitize_value "$val")
                     is_sensitive_property "$key" && val_cleaned="****"
-                    echo "role,${ROLE},${key},\"${val_cleaned}\"" >> "$MASTER_CSV_FILE"
+                    echo "role,${ROLE},${key},\"${val_cleaned}\",\"${ROLE_API_URI}\"" >> "$MASTER_CSV_FILE"
+                    # Write PUT API call for role config property
+                    ROLE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups/${ROLE}/config\" -H 'content-type:application/json' -d '{\"items\":[{\"name\":\"${key}\",\"value\":\"${val_cleaned}\"}]}'"
+                    echo "${CLUSTER_SERVICE_NAME},${ROLE},${key},${ROLE_PUT_CMD}" >> "$ROLE_PUT_CONTROL"
                 done
         done
     done
+
+    # Save the master CSV file path for later use
+    export MASTER_CSV_FILE_PATH="$MASTER_CSV_FILE"
+
+    # Print API doc reference
+    echo -e "\nAccess API DOC (STATIC):"
+    echo "https://$(hostname -f)/static/apidocs/index.html"
 }
 
 # Function: Main
@@ -159,8 +210,6 @@ main () {
     export OUTPUT_DIR=/tmp/$(hostname -f)/$(date +"%Y%m%d%H%M%S")
 
     do_test_credentials
-    export CM_API_VERSION=$(curl -s -L -k -u ${WORKLOAD_USER}:${WORKLOAD_USER_PASS} \
-        -X GET "${CM_SERVER}/api/version")
 
     mkdir -p ${OUTPUT_DIR}/{ServiceConfigs,roleConfigGroups}
 
@@ -175,8 +224,10 @@ if [[ $? -eq 0 ]]; then
     main
     echo -e "\n🎯 Output directory: ${OUTPUT_DIR}"
     echo "📦 Compressing..."
+    # Find the master CSV file (should be only one, as per naming convention)
+    MASTER_CSV_FILE_PATH=$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name "$(hostname -f)_${CM_CLUSTER_NAME}_all_services_config_*.csv" | head -n1)
     tar czf "${OUTPUT_DIR}/ServiceConfigs_roleConfigGroups_$(date +"%Y%m%d%H%M%S").tgz" \
-        -C "${OUTPUT_DIR}" ServiceConfigs roleConfigGroups all_services_config.csv
+        -C "${OUTPUT_DIR}" ServiceConfigs roleConfigGroups api_control_files "$(basename "$MASTER_CSV_FILE_PATH")"
     echo -e "\n✅ Bundle ready:"
     ls -lh "${OUTPUT_DIR}/ServiceConfigs_roleConfigGroups_"*.tgz
 else
