@@ -12,17 +12,12 @@ from datetime import datetime
 from pathlib import Path
 import os
 import re
+from collections.abc import MutableMapping
 
 def log(message):
-    """
-    Print a log message with a timestamp.
-    """
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
 
 def usage():
-    """
-    Print usage instructions and exit the script.
-    """
     print("Usage: python discovery_datahubs_per_env.py --environment-name <environment-name> [--output-dir <path>] [--profile <cdp-profile>] [--debug]")
     print("       python discovery_datahubs_per_env.py --help")
     print("       python discovery_datahubs_per_env.py -h")
@@ -35,9 +30,6 @@ def usage():
     sys.exit(1)
 
 def get_cdp_profiles():
-    """
-    Parse ~/.cdp/credentials and return a list of available profiles.
-    """
     cred_path = os.path.expanduser("~/.cdp/credentials")
     profiles = []
     if not os.path.exists(cred_path):
@@ -52,13 +44,6 @@ def get_cdp_profiles():
     return profiles
 
 def spinner_thread_func(stop_event, message):
-    """
-    Display a spinner animation in the terminal while a background task is running.
-
-    Args:
-        stop_event (threading.Event): Event to signal the spinner to stop.
-        message (str): Message to display alongside the spinner.
-    """
     for symbol in itertools.cycle("|/-\\"):
         if stop_event.is_set():
             break
@@ -67,17 +52,6 @@ def spinner_thread_func(stop_event, message):
     print("\r", end="")
 
 def run_command(command, task_name=None, debug=False):
-    """
-    Run a shell command and optionally display a spinner while it runs.
-
-    Args:
-        command (str): The shell command to execute.
-        task_name (str, optional): If provided, display a spinner with this task name.
-        debug (bool): If True, print the command and output for debugging.
-
-    Returns:
-        tuple: (stdout output as str or None, stderr output as str or None)
-    """
     stop_spinner = threading.Event()
     if task_name:
         spinner = threading.Thread(target=spinner_thread_func, args=(stop_spinner, task_name))
@@ -85,7 +59,6 @@ def run_command(command, task_name=None, debug=False):
     try:
         if debug:
             log(f"DEBUG: Running command: {command}")
-        # Use shell=True to allow --profile to be parsed correctly
         result = subprocess.run(command, capture_output=True, text=True, shell=True)
         if task_name:
             stop_spinner.set()
@@ -106,17 +79,6 @@ def run_command(command, task_name=None, debug=False):
         return None, str(e)
 
 def run_command_json(command, task_name=None, debug=False):
-    """
-    Run a shell command and parse its output as JSON.
-
-    Args:
-        command (str): The shell command to execute.
-        task_name (str, optional): If provided, display a spinner with this task name.
-        debug (bool): If True, print the command and output for debugging.
-
-    Returns:
-        tuple: (parsed JSON object or None, error message or None)
-    """
     output, error = run_command(command, task_name, debug=debug)
     if output:
         try:
@@ -128,13 +90,6 @@ def run_command_json(command, task_name=None, debug=False):
     return None, error
 
 def save_to_file(data, filepath):
-    """
-    Save data to a file. If data is a string, write as text; otherwise, dump as JSON.
-
-    Args:
-        data (str or dict): Data to save.
-        filepath (Path): Path to the output file.
-    """
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, "w") as f:
         if isinstance(data, str):
@@ -144,13 +99,6 @@ def save_to_file(data, filepath):
     log(f"✅ Saved: {filepath}")
 
 def save_recipe_script(content, filepath):
-    """
-    Save a recipe script to a file and format it with shfmt if available.
-
-    Args:
-        content (str): Script content.
-        filepath (Path): Path to the output file.
-    """
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, "w") as f:
         f.write(content)
@@ -161,34 +109,15 @@ def save_recipe_script(content, filepath):
         log("⚠️ 'shfmt' not found, skipping shell formatting.")
 
 def get_timestamp():
-    """
-    Get the current timestamp as a string in the format YYYYMMDDHHMMSS.
-
-    Returns:
-        str: Timestamp string.
-    """
     return datetime.now().strftime("%Y%m%d%H%M%S")
 
 def flatten_instance_groups(cluster_name, environment_name, instance_groups, timestamp):
-    """
-    Flatten instance group data into a list of dictionaries for CSV export.
-
-    Args:
-        cluster_name (str): Name of the cluster.
-        environment_name (str): Name of the environment.
-        instance_groups (list): List of instance group dictionaries.
-        timestamp (str): Timestamp string.
-
-    Returns:
-        list: List of dictionaries, each representing an instance (and its volumes).
-    """
     rows = []
     for ig in instance_groups:
         ig_name = ig.get("name")
         azs = ",".join(ig.get("availabilityZones", []))
         subnets = ",".join(ig.get("subnetIds", []))
         recipes = ",".join(ig.get("recipes", []))
-
         for inst in ig.get("instances", []):
             base = {
                 "environment": environment_name,
@@ -215,7 +144,6 @@ def flatten_instance_groups(cluster_name, environment_name, instance_groups, tim
             }
             volumes = inst.get("attachedVolumes", [])
             if volumes:
-                # If there are attached volumes, create a row for each volume
                 for vol in volumes:
                     row = base.copy()
                     row.update({
@@ -225,7 +153,6 @@ def flatten_instance_groups(cluster_name, environment_name, instance_groups, tim
                     })
                     rows.append(row)
             else:
-                # If no volumes, set volume fields to None
                 base.update({
                     "volumeCount": None,
                     "volumeType": None,
@@ -234,33 +161,184 @@ def flatten_instance_groups(cluster_name, environment_name, instance_groups, tim
                 rows.append(base)
     return rows
 
-def save_instance_groups_to_csv(csv_path, rows):
+def flatten_datalake_instance_groups(datalake_name, environment_name, datalake_obj, timestamp):
     """
-    Save a list of instance group rows to a CSV file.
+    Flatten the instanceGroups for a datalake, similar to flatten_instance_groups for DataHub.
+    This function supports AWS, Azure, and GCP datalakes.
+    """
+    rows = []
+    # Top-level instanceGroups (for newer API responses)
+    instance_groups = datalake_obj.get("instanceGroups", [])
+    if instance_groups:
+        for ig in instance_groups:
+            ig_name = ig.get("name")
+            azs = ",".join(ig.get("availabilityZones", []))
+            recipes = ",".join(ig.get("recipes", []))
+            for inst in ig.get("instances", []):
+                base = {
+                    "environment": environment_name,
+                    "datalakeName": datalake_name,
+                    "instanceGroupName": ig_name,
+                    "availabilityZones": azs,
+                    "recipes": recipes,
+                    "nodeGroupRole": inst.get("instanceGroup"),
+                    "instanceId": inst.get("id"),
+                    "state": inst.get("state"),
+                    "discoveryFQDN": inst.get("discoveryFQDN"),
+                    "instanceStatus": inst.get("instanceStatus"),
+                    "statusReason": inst.get("statusReason"),
+                    "privateIp": inst.get("privateIp"),
+                    "publicIp": inst.get("publicIp"),
+                    "sshPort": inst.get("sshPort"),
+                    "clouderaManagerServer": inst.get("clouderaManagerServer"),
+                    "instanceTypeVal": inst.get("instanceTypeVal"),
+                    "availabilityZone": inst.get("availabilityZone"),
+                    "instanceVmType": inst.get("instanceVmType"),
+                    "rackId": inst.get("rackId"),
+                    "subnetId": inst.get("subnetId")
+                }
+                volumes = inst.get("attachedVolumes", [])
+                if volumes:
+                    for vol in volumes:
+                        row = base.copy()
+                        row.update({
+                            "volumeCount": vol.get("count"),
+                            "volumeType": vol.get("volumeType"),
+                            "volumeSize": vol.get("size")
+                        })
+                        rows.append(row)
+                else:
+                    base.update({
+                        "volumeCount": None,
+                        "volumeType": None,
+                        "volumeSize": None
+                    })
+                    rows.append(base)
+    else:
+        # Try to find instanceGroups under cloud provider configuration
+        for config_key in ["awsConfiguration", "azureConfiguration", "gcpConfiguration"]:
+            config = datalake_obj.get(config_key, {})
+            if isinstance(config, dict):
+                instance_groups = config.get("instanceGroups", [])
+                for ig in instance_groups:
+                    ig_name = ig.get("name")
+                    azs = ",".join(ig.get("availabilityZones", []))
+                    recipes = ",".join(ig.get("recipes", []))
+                    for inst in ig.get("instances", []):
+                        base = {
+                            "environment": environment_name,
+                            "datalakeName": datalake_name,
+                            "instanceGroupName": ig_name,
+                            "availabilityZones": azs,
+                            "recipes": recipes,
+                            "nodeGroupRole": inst.get("instanceGroup"),
+                            "instanceId": inst.get("id"),
+                            "state": inst.get("state"),
+                            "discoveryFQDN": inst.get("discoveryFQDN"),
+                            "instanceStatus": inst.get("instanceStatus"),
+                            "statusReason": inst.get("statusReason"),
+                            "privateIp": inst.get("privateIp"),
+                            "publicIp": inst.get("publicIp"),
+                            "sshPort": inst.get("sshPort"),
+                            "clouderaManagerServer": inst.get("clouderaManagerServer"),
+                            "instanceTypeVal": inst.get("instanceTypeVal"),
+                            "availabilityZone": inst.get("availabilityZone"),
+                            "instanceVmType": inst.get("instanceVmType"),
+                            "rackId": inst.get("rackId"),
+                            "subnetId": inst.get("subnetId")
+                        }
+                        volumes = inst.get("attachedVolumes", [])
+                        if volumes:
+                            for vol in volumes:
+                                row = base.copy()
+                                row.update({
+                                    "volumeCount": vol.get("count"),
+                                    "volumeType": vol.get("volumeType"),
+                                    "volumeSize": vol.get("size")
+                                })
+                                rows.append(row)
+                        else:
+                            base.update({
+                                "volumeCount": None,
+                                "volumeType": None,
+                                "volumeSize": None
+                            })
+                            rows.append(base)
+    return rows
 
-    Args:
-        csv_path (Path): Path to the output CSV file.
-        rows (list): List of dictionaries to write as rows.
+def flatten_freeipa_instance_groups(environment_name, freeipa_obj, timestamp):
     """
+    Flatten the FreeIPA instance groups, similar to DataHub and Datalake logic.
+    Returns a list of rows, each representing an instance in a group, with attached volume info.
+    """
+    rows = []
+    if not freeipa_obj:
+        return rows
+
+    # FreeIPA does not have explicit instanceGroups, but we can treat all instances as a single group or by instanceGroup field.
+    instances = freeipa_obj.get("instances", [])
+    recipes = ",".join(freeipa_obj.get("recipes", []))
+    # Group by instanceGroup field if present, else treat as one group
+    for inst in instances:
+        ig_name = inst.get("instanceGroup") or "default"
+        az = inst.get("availabilityZone") or ""
+        # FreeIPA does not have subnetIds at top level, but subnetId per instance
+        subnet_id = inst.get("subnetId") or ""
+        # Recipes are at top level for FreeIPA
+        base = {
+            "environment": environment_name,
+            "freeipaInstanceGroupName": ig_name,
+            "availabilityZone": az,
+            "subnetId": subnet_id,
+            "recipes": recipes,
+            "instanceId": inst.get("instanceId"),
+            "instanceStatus": inst.get("instanceStatus"),
+            "instanceType": inst.get("instanceType"),
+            "instanceVmType": inst.get("instanceVmType"),
+            "lifeCycle": inst.get("lifeCycle"),
+            "privateIP": inst.get("privateIP"),
+            "publicIP": inst.get("publicIP"),
+            "sshPort": inst.get("sshPort"),
+            "discoveryFQDN": inst.get("discoveryFQDN"),
+            "freeipaCrn": freeipa_obj.get("crn"),
+            "freeipaDomain": freeipa_obj.get("domain"),
+            "freeipaHostname": freeipa_obj.get("hostname"),
+            "freeipaInstanceCountByGroup": freeipa_obj.get("instanceCountByGroup"),
+            "freeipaMultiAz": freeipa_obj.get("multiAz"),
+            "freeipaImageId": (freeipa_obj.get("imageDetails") or {}).get("imageId"),
+            "freeipaImageCatalogName": (freeipa_obj.get("imageDetails") or {}).get("imageCatalogName"),
+            "freeipaImageOs": (freeipa_obj.get("imageDetails") or {}).get("imageOs"),
+        }
+        volumes = inst.get("attachedVolumes", [])
+        if volumes:
+            for vol in volumes:
+                row = base.copy()
+                row.update({
+                    "volumeCount": vol.get("count"),
+                    "volumeSize": vol.get("size"),
+                    "volumeType": vol.get("volumeType") if "volumeType" in vol else None
+                })
+                rows.append(row)
+        else:
+            base.update({
+                "volumeCount": None,
+                "volumeSize": None,
+                "volumeType": None
+            })
+            rows.append(base)
+    return rows
+
+def save_instance_groups_to_csv(csv_path, rows):
     if not rows:
         log(f"⚠️ No instance group data to write: {csv_path}")
         return
-    with open(csv_path, "w", newline="") as csvfile:
+    with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=rows[0].keys())
         writer.writeheader()
         writer.writerows(rows)
     log(f"✅ Saved CSV: {csv_path}")
 
 def describe_unique_recipes(recipe_dir, all_recipes_set, profile, debug=False):
-    """
-    For each unique recipe name, describe it using the CLI and save its details and script.
-
-    Args:
-        recipe_dir (Path): Directory to save recipe files.
-        all_recipes_set (set): Set of unique recipe names.
-        profile (str): CDP CLI profile to use.
-        debug (bool): If True, print debug info.
-    """
     for recipe_name in sorted(all_recipes_set):
         describe, err = run_command_json(
             f"cdp datahub describe-recipe --profile {profile} --recipe-name {recipe_name}",
@@ -277,20 +355,98 @@ def describe_unique_recipes(recipe_dir, all_recipes_set, profile, debug=False):
         else:
             log(f"⚠️ Failed to describe recipe: {recipe_name}")
 
+def describe_unique_datalake_recipes(recipe_dir, all_recipes_set, profile, debug=False):
+    """
+    For each unique datalake recipe name, describe it using the CLI and save its details and script.
+    """
+    for recipe_name in sorted(all_recipes_set):
+        describe, err = run_command_json(
+            f"cdp datalake describe-recipe --profile {profile} --recipe-name {recipe_name}",
+            task_name=f"Describing datalake recipe {recipe_name}",
+            debug=debug
+        )
+        if describe:
+            json_path = recipe_dir / f"recipe_{recipe_name}.json"
+            script_path = recipe_dir / f"recipe_{recipe_name}.sh"
+            save_to_file(describe, json_path)
+            recipe_content = describe.get("recipe", {}).get("recipeContent")
+            if recipe_content:
+                save_recipe_script(recipe_content, script_path)
+        else:
+            log(f"⚠️ Failed to describe datalake recipe: {recipe_name}")
+
+def flatten_json(y, parent_key='', sep='.'):
+    items = []
+    if isinstance(y, list):
+        for i, v in enumerate(y):
+            new_key = f"{parent_key}[{i}]" if parent_key else str(i)
+            items.extend(flatten_json(v, new_key, sep=sep).items())
+    elif isinstance(y, MutableMapping):
+        for k, v in y.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            items.extend(flatten_json(v, new_key, sep=sep).items())
+    else:
+        items.append((parent_key, y))
+    return dict(items)
+
+def save_flattened_json_to_csv(json_obj, csv_path):
+    if isinstance(json_obj, list):
+        flat_rows = [flatten_json(item) for item in json_obj]
+    else:
+        flat_rows = [flatten_json(json_obj)]
+    fieldnames = set()
+    for row in flat_rows:
+        fieldnames.update(row.keys())
+    fieldnames = sorted(fieldnames)
+    with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in flat_rows:
+            writer.writerow(row)
+    log(f"✅ Saved CSV: {csv_path}")
+
+def flatten_freeipa_instances(freeipa_details):
+    # Deprecated: replaced by flatten_freeipa_instance_groups for instance group logic
+    rows = []
+    if not freeipa_details:
+        return rows
+    instances = freeipa_details.get("instances", [])
+    for inst in instances:
+        row = flatten_json(inst)
+        for k in freeipa_details:
+            if k != "instances":
+                row[f"freeipaDetails.{k}"] = freeipa_details[k]
+        rows.append(row)
+    return rows
+
+def flatten_datalake_instances(datalake_details):
+    rows = []
+    if not datalake_details:
+        return rows
+    config = None
+    for key in ["awsConfiguration", "azureConfiguration", "gcpConfiguration"]:
+        if key in datalake_details:
+            config = datalake_details[key]
+            break
+    if not config:
+        return rows
+    instances = config.get("instances", [])
+    for inst in instances:
+        row = flatten_json(inst)
+        for k in datalake_details:
+            if k not in ["awsConfiguration", "azureConfiguration", "gcpConfiguration"]:
+                row[f"datalakeDetails.{k}"] = datalake_details[k]
+        row["cloudProvider"] = key.replace("Configuration", "")
+        rows.append(row)
+    return rows
+
 def main():
-    """
-    Main function to orchestrate the discovery and export of DataHub cluster information
-    for a given environment. Handles command-line arguments, output directory, and
-    iterates through clusters to collect and save their details.
-    """
-    # Argument parsing
     environment_name = None
     output_arg = None
     profile = "default"
     debug = False
 
     args = sys.argv[1:]
-    # Show usage if no arguments or --help/-h is present
     if not args or "--help" in args or "-h" in args:
         usage()
 
@@ -324,7 +480,6 @@ def main():
     if not environment_name:
         usage()
 
-    # Check for CDP CLI configuration
     profiles = get_cdp_profiles()
     if not profiles:
         log("⚠️ No CDP CLI profiles found in ~/.cdp/credentials. Please configure the CDP CLI before running this script.")
@@ -339,8 +494,179 @@ def main():
 
     log(f"🔍 Starting DataHub discovery for environment: {environment_name} (profile: {profile})")
 
+    # --- ENVIRONMENT SECTION ---
+    environment_dir = base_dir / "environment"
+    environment_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Describe the environment and save JSON
+    env_json_path = environment_dir / f"ENVIRONMENT_ENV_{environment_name}_{timestamp}.json"
+    env_cmd = f"cdp environments describe-environment --profile {profile} --environment-name {environment_name}"
+    env_json, env_err = run_command_json(env_cmd, task_name=f"Describing environment {environment_name}", debug=debug)
+    if env_json:
+        save_to_file(env_json, env_json_path)
+        env_obj = env_json.get("environment", env_json)
+        env_csv_path = environment_dir / f"ENVIRONMENT_ENV_{environment_name}_{timestamp}.csv"
+        save_flattened_json_to_csv(env_obj, env_csv_path)
+    else:
+        log(f"⚠️ Could not describe environment {environment_name}")
+        if debug:
+            log(f"DEBUG: env_err: {env_err}")
+
+    # 2. Get FreeIPA upgrade options and save JSON
+    freeipa_upgrade_json_path = environment_dir / f"ENVIRONMENT_ENV_{environment_name}_FreeIPAUpgradeOptions_{timestamp}.json"
+    freeipa_upgrade_cmd = f"cdp environments get-freeipa-upgrade-options --profile {profile} --environment {environment_name}"
+    freeipa_upgrade_json, freeipa_upgrade_err = run_command_json(freeipa_upgrade_cmd, task_name=f"Getting FreeIPA upgrade options for {environment_name}", debug=debug)
+    if freeipa_upgrade_json:
+        save_to_file(freeipa_upgrade_json, freeipa_upgrade_json_path)
+    else:
+        log(f"⚠️ Could not get FreeIPA upgrade options for {environment_name}")
+        if debug:
+            log(f"DEBUG: freeipa_upgrade_err: {freeipa_upgrade_err}")
+
+    # 3. Flatten FreeIPA details and instances to CSV (ENHANCED LOGIC)
+    freeipa_details = None
+    if env_json:
+        env_obj = env_json.get("environment", env_json)
+        freeipa_details = env_obj.get("freeipa") or env_obj.get("freeIpaDetails") or env_obj.get("freeIpa")
+    if freeipa_details:
+        # Enhanced: flatten instance groups for FreeIPA, similar to DataHub/Datalake
+        freeipa_ig_rows = flatten_freeipa_instance_groups(environment_name, freeipa_details, timestamp)
+        if freeipa_ig_rows:
+            freeipa_ig_csv_path = environment_dir / f"ENVIRONMENT_ENV_{environment_name}_FreeIPAInstanceGroups_{timestamp}.csv"
+            save_instance_groups_to_csv(freeipa_ig_csv_path, freeipa_ig_rows)
+        else:
+            log(f"⚠️ No FreeIPA instance groups found for {environment_name}")
+    else:
+        log(f"⚠️ No FreeIPA details found for {environment_name}")
+
+    # --- DATALAKE SECTION ---
+    datalake_dir = base_dir / "datalake"
+    datalake_dir.mkdir(parents=True, exist_ok=True)
+
+    datalake_recipes_set = set()
+
+    datalake_list_cmd = f"cdp datalake list-datalakes --profile {profile} --environment-name {environment_name}"
+    datalake_list_json, datalake_list_err = run_command_json(datalake_list_cmd, task_name=f"Listing Datalakes for {environment_name}", debug=debug)
+    datalakes = datalake_list_json.get("datalakes", []) if datalake_list_json else []
+
+    all_datalake_instance_rows = []
+
+    if datalakes:
+        log(f"🛢️ Found {len(datalakes)} datalake(s):")
+        for dl in datalakes:
+            log(f"  - {dl.get('datalakeName')}")
+
+        for datalake in datalakes:
+            datalake_crn = datalake.get("crn")
+            datalake_name = datalake.get("datalakeName")
+            if not datalake_crn or not datalake_name:
+                continue
+
+            dl_subdir = datalake_dir / datalake_name
+            dl_subdir.mkdir(parents=True, exist_ok=True)
+            output_prefix = f"ENVIRONMENT_ENV_{environment_name}_DL_{datalake_name}"
+
+            # 1. Describe the datalake
+            describe_dl_cmd = f"cdp datalake describe-datalake --profile {profile} --datalake-name {datalake_crn}"
+            describe_dl_json, describe_dl_err = run_command_json(describe_dl_cmd, task_name=f"Describing datalake {datalake_name}", debug=debug)
+            if describe_dl_json:
+                describe_dl_path = dl_subdir / f"{output_prefix}_{timestamp}.json"
+                save_to_file(describe_dl_json, describe_dl_path)
+                describe_dl_csv_path = dl_subdir / f"{output_prefix}_{timestamp}.csv"
+                dl_obj = describe_dl_json.get("datalake", describe_dl_json.get("datalakeDetails", describe_dl_json))
+                save_flattened_json_to_csv(dl_obj, describe_dl_csv_path)
+
+                # --- DATALAKE INSTANCE GROUPS LOGIC ---
+                dl_instance_groups_rows = flatten_datalake_instance_groups(datalake_name, environment_name, dl_obj, timestamp)
+                if dl_instance_groups_rows:
+                    dl_ig_csv_path = dl_subdir / f"{output_prefix}_InstanceGroups_{timestamp}.csv"
+                    save_instance_groups_to_csv(dl_ig_csv_path, dl_instance_groups_rows)
+                    all_datalake_instance_rows.extend(dl_instance_groups_rows)
+                else:
+                    log(f"⚠️ No datalake instance groups found for {datalake_name}")
+
+                # --- DATALAKE RECIPES LOGIC ---
+
+                # 1. Top-level "recipes" key
+                recipes_top = dl_obj.get("recipes", [])
+                for recipe in recipes_top:
+                    datalake_recipes_set.add(recipe)
+
+                # 2. Recipes under configuration
+                for config_key in ["awsConfiguration", "azureConfiguration", "gcpConfiguration"]:
+                    config = dl_obj.get(config_key, {})
+                    if isinstance(config, dict):
+                        # recipes at config level
+                        for recipe in config.get("recipes", []):
+                            datalake_recipes_set.add(recipe)
+                        # recipes under instanceGroups (if present)
+                        for ig in config.get("instanceGroups", []):
+                            for recipe in ig.get("recipes", []):
+                                datalake_recipes_set.add(recipe)
+
+                # 3. Recipes under instanceGroups at top level (if present)
+                for ig in dl_obj.get("instanceGroups", []):
+                    for recipe in ig.get("recipes", []):
+                        datalake_recipes_set.add(recipe)
+
+            else:
+                log(f"⚠️ Could not describe datalake {datalake_name}")
+                if debug:
+                    log(f"DEBUG: describe_dl_err: {describe_dl_err}")
+
+            # 2. Describe the database server for the datalake
+            describe_db_cmd = f"cdp datalake describe-database-server --profile {profile} --cluster-crn {datalake_crn}"
+            describe_db_json, describe_db_err = run_command_json(describe_db_cmd, task_name=f"Describing DB server for datalake {datalake_name}", debug=debug)
+            if describe_db_json:
+                describe_db_path = dl_subdir / f"{output_prefix}_DB_{timestamp}.json"
+                save_to_file(describe_db_json, describe_db_path)
+                describe_db_csv_path = dl_subdir / f"{output_prefix}_DB_{timestamp}.csv"
+                save_flattened_json_to_csv(describe_db_json, describe_db_csv_path)
+            else:
+                log(f"⚠️ Could not describe DB server for datalake {datalake_name}")
+                if debug:
+                    log(f"DEBUG: describe_db_err: {describe_db_err}")
+
+            # 3. Show available upgrade images
+            for suffix, label, upgrade_flag in [
+                ("AvailableImages", "Checking available upgrade images", "--show-available-images"),
+                ("RunTimeAvailableImages", "Checking latest runtime image", "--show-latest-available-image-per-runtime")
+            ]:
+                upgrade_cmd = f"cdp datalake upgrade-datalake --profile {profile} {upgrade_flag} --datalake-name {datalake_crn}"
+                upgrade_json, upgrade_err = run_command_json(upgrade_cmd, task_name=f"{label} for datalake {datalake_name}", debug=debug)
+                if upgrade_json:
+                    upgrade_path = dl_subdir / f"{output_prefix}_{suffix}_{timestamp}.json"
+                    save_to_file(upgrade_json, upgrade_path)
+                    upgrade_csv_path = dl_subdir / f"{output_prefix}_{suffix}_{timestamp}.csv"
+                    save_flattened_json_to_csv(upgrade_json, upgrade_csv_path)
+                else:
+                    log(f"⚠️ Skipping {suffix} for datalake {datalake_name}")
+                    if debug:
+                        log(f"DEBUG: {suffix} err: {upgrade_err}")
+    else:
+        log("No Datalakes found in this environment.")
+        if debug:
+            log(f"DEBUG: datalake_list_json: {datalake_list_json}")
+            log(f"DEBUG: datalake_list_err: {datalake_list_err}")
+
     all_instance_rows = []
     all_recipes_set = set()
+
+    # --- DATALAKE RECIPES: describe and save ---
+    if datalake_recipes_set:
+        for datalake in datalakes:
+            datalake_name = datalake.get("datalakeName")
+            if not datalake_name:
+                continue
+            dl_subdir = datalake_dir / datalake_name
+            recipe_dir = dl_subdir / "recipes"
+            describe_unique_datalake_recipes(recipe_dir, datalake_recipes_set, profile, debug=debug)
+    else:
+        log("ℹ️ No recipes found in datalake(s).")
+
+    # Save all datalake instance groups to a global CSV
+    if all_datalake_instance_rows:
+        save_instance_groups_to_csv(base_dir / f"ALL_{environment_name}_datalake_instance_groups.csv", all_datalake_instance_rows)
 
     # List all DataHub clusters in the environment
     list_output, list_err = run_command_json(
@@ -410,22 +736,18 @@ def main():
                 debug=debug
             )
 
-            # If template information is available, save it and its content
             if template:
                 cluster_template = template.get("clusterTemplate", {})
                 status = cluster_template.get("status")
                 template_name = cluster_template.get("clusterTemplateName", "").strip()
                 content = cluster_template.get("clusterTemplateContent")
 
-                # Always save the full template description
                 save_to_file(
                     {"clusterTemplate": cluster_template},
                     cluster_dir / f"{output_prefix}_Template_{timestamp}.json"
                 )
 
-                # Save the template content separately for user-managed or default templates
                 if status in ("USER_MANAGED", "DEFAULT") and content:
-                    # Make filename-safe version of template name
                     safe_template_name = template_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
                     content_path = cluster_dir / f"{safe_template_name}_content.json"
                     try:
@@ -448,7 +770,6 @@ def main():
         else:
             log(f"⚠️ clusterTemplateCrn not found for {name}, skipping template describe.")
 
-        # Check available upgrade images and latest runtime image for the cluster
         for suffix, label in [
             ("AvailableImages", "Checking available upgrade images"),
             ("RunTimeAvailableImages", "Checking latest runtime image")
@@ -466,7 +787,6 @@ def main():
                 if debug:
                     log(f"DEBUG: {suffix} err: {err}")
 
-        # Describe the database server for the cluster
         db_server, db_err = run_command_json(
             f"cdp datahub describe-database-server --profile {profile} --cluster-crn {crn}",
             task_name=f"Describing DB server for {name}",
@@ -479,17 +799,14 @@ def main():
             if debug:
                 log(f"DEBUG: db_err: {db_err}")
 
-        # Describe all unique recipes found in the cluster
         if all_recipes_set:
             describe_unique_recipes(recipe_dir, all_recipes_set, profile, debug=debug)
         else:
             log(f"ℹ️ No recipes found in cluster: {name}")
 
-    # Save all instance group data for all clusters to a single CSV
     if all_instance_rows:
-        save_instance_groups_to_csv(base_dir / f"ALL_{environment_name}_instance_groups.csv", all_instance_rows)
+        save_instance_groups_to_csv(base_dir / f"ALL_{environment_name}_datahub_instance_groups.csv", all_instance_rows)
 
-    # Archive the output directory as a tar.gz file
     archive_path = f"{base_dir}.tar.gz"
     shutil.make_archive(str(base_dir), 'gztar', root_dir=base_dir)
     log(f"📦 Archived output to: {archive_path}")
