@@ -440,6 +440,38 @@ def flatten_datalake_instances(datalake_details):
         rows.append(row)
     return rows
 
+def get_cod_database_details(database_name, environment_name, profile, debug=False):
+    """
+    Run 'cdp opdb describe-database' for the given COD database name and environment.
+    Returns the JSON object (or None, error).
+    """
+    cmd = f"cdp opdb describe-database --profile {profile} --database-name {database_name} --environment-name {environment_name}"
+    return run_command_json(cmd, task_name=f"Describing COD database {database_name}", debug=debug)
+
+def get_cod_database_name_for_cluster(cluster_internal_name, environment_name, profile, debug=False):
+    """
+    List all opdb databases in the environment, and find the one whose 'internalName' matches the DataHub clusterName.
+    Returns the 'databaseName' if found, else None.
+    """
+    # The correct approach is to list all COD databases in the environment,
+    # then find the one whose "internalName" matches the DataHub clusterName,
+    # and then get its "databaseName".
+    cmd = f"cdp opdb list-databases --profile {profile} --environment-name {environment_name}"
+    opdb_list_json, opdb_list_err = run_command_json(cmd, task_name=f"Listing COD databases for {environment_name}", debug=debug)
+    if not opdb_list_json:
+        if debug:
+            log(f"DEBUG: Could not list COD databases: {opdb_list_err}")
+        return None
+    databases = opdb_list_json.get("databases", [])
+    for db in databases:
+        # The correct field to match is "internalName"
+        internal_name = db.get("internalName")
+        # The correct field to use for describe is "databaseName"
+        database_name = db.get("databaseName")
+        if internal_name == cluster_internal_name:
+            return database_name
+    return None
+
 def main():
     environment_name = None
     output_arg = None
@@ -489,7 +521,21 @@ def main():
         sys.exit(1)
 
     timestamp = get_timestamp()
-    base_dir = Path(output_arg or f"/tmp/discovery_datahubs-{timestamp}")
+
+    # --- Begin output_dir logic rewrite ---
+    if output_arg:
+        # If the user provided --output-dir, append the timestamp to the folder name
+        # If the path ends with a slash, remove it for consistency
+        output_arg = output_arg.rstrip("/")
+        # If the output_arg already ends with the timestamp, don't double-append
+        if not output_arg.endswith(timestamp):
+            base_dir = Path(f"{output_arg}-{timestamp}")
+        else:
+            base_dir = Path(output_arg)
+    else:
+        base_dir = Path(f"/tmp/discovery_datahubs-{timestamp}")
+    # --- End output_dir logic rewrite ---
+
     base_dir.mkdir(parents=True, exist_ok=True)
 
     log(f"🔍 Starting DataHub discovery for environment: {environment_name} (profile: {profile})")
@@ -690,6 +736,20 @@ def main():
     for c in clusters:
         log(f"  - {c.get('clusterName')}")
 
+    # Pre-fetch all COD databases for the environment for efficient lookup
+    cod_db_lookup = {}
+    cod_db_list_json, cod_db_list_err = run_command_json(
+        f"cdp opdb list-databases --profile {profile} --environment-name {environment_name}",
+        task_name=f"Listing COD databases for {environment_name}",
+        debug=debug
+    )
+    if cod_db_list_json:
+        for db in cod_db_list_json.get("databases", []):
+            internal_name = db.get("internalName")
+            database_name = db.get("databaseName")
+            if internal_name and database_name:
+                cod_db_lookup[internal_name] = database_name
+
     for cluster in clusters:
         name = cluster.get("clusterName")
         crn = cluster.get("crn")
@@ -713,6 +773,26 @@ def main():
 
         output_prefix = f"ENVIRONMENT_ENV_{environment_name}_DH_{name}"
         save_to_file(describe, cluster_dir / f"{output_prefix}_{timestamp}.json")
+
+        # Special handling for COD (Operational Database) clusters
+        # Instead of using the DataHub clusterName as the COD database name, we must:
+        # 1. List all COD databases in the environment (already done above)
+        # 2. Find the one whose "internalName" matches the DataHub clusterName
+        # 3. Use its "databaseName" to describe the COD database
+        if name and name.startswith("cod-"):
+            cod_database_name = cod_db_lookup.get(name)
+            if cod_database_name:
+                cod_json, cod_err = get_cod_database_details(cod_database_name, environment_name, profile, debug=debug)
+                if cod_json:
+                    cod_json_path = cluster_dir / f"{output_prefix}_COD_{timestamp}.json"
+                    save_to_file(cod_json, cod_json_path)
+                else:
+                    log(f"⚠️ Could not describe COD database {cod_database_name} (matched for cluster {name})")
+                    if debug:
+                        log(f"DEBUG: COD describe error: {cod_err}")
+            else:
+                log(f"⚠️ Could not find COD databaseName for cluster internalName '{name}' in environment '{environment_name}'")
+        # End COD logic
 
         # Flatten and save instance group information
         instance_groups = describe.get("cluster", {}).get("instanceGroups", [])
