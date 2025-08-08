@@ -1,54 +1,64 @@
-# CDP DataHub Cluster Discovery and Instance Group Export Tool
+# CDP Environment Discovery: DataHub, Datalake, and FreeIPA
 
-This Python script automates the discovery, inspection, and export of Cloudera DataHub cluster information within a specified CDP environment. It queries the CDP CLI for DataHub clusters, gathers detailed metadata, and exports JSON and CSV summaries.
+This Python tool automates discovery, inspection, and export of resources within a CDP environment. It queries the CDP CLI for DataHub clusters, Datalakes, and FreeIPA details, gathers metadata, and exports JSON/CSV summaries. A timestamped output folder is created and compressed into a `.tar.gz` at the end.
 
 ---
 
 ## 🔧 Features
 
-- Discovers all DataHub clusters in a given environment
-- Describes each cluster and its resources
-- Extracts instance group and node information into:
-  - **Per-cluster CSV** with detailed instance + volume metadata
-  - **Global CSV** aggregating all instance groups
-- Retrieves:
-  - Available upgrade images
-  - Latest runtime image per runtime
-  - Database server metadata (if available)
-  - Cluster template metadata with parsed and formatted `clusterTemplateContent`
-- Adds spinner indicators for long-running operations
-- Organized output structure per execution
+- Discovers resources in a CDP environment:
+  - **Environment**: describe and flatten to CSV; FreeIPA upgrade options; FreeIPA instance groups to CSV
+  - **Datalake**: list/describe, DB server, available/runtime images, instance groups to CSV, recipes discovery+export
+  - **DataHub**: list/describe, instance groups to CSV, upgrade images, DB server, recipes discovery+export
+- Extracts instance group + volume metadata into:
+  - Per-entity CSV (per DataHub cluster / per Datalake)
+  - Aggregated CSVs across all DataHubs and across all Datalakes
+- Retrieves and pretty-prints cluster template content (when applicable)
+- Handles COD clusters by mapping DataHub `clusterName` to OPDB `databaseName` and describing the COD database
+- Creates a timestamped output directory and a final `.tar.gz` archive
+- Spinner indicators for long-running operations
 
 ---
 
 ## 🧪 Requirements
 
 - Python 3.6+
-- CDP CLI must be installed and configured with valid credentials  
-  ⚠️ You must be authenticated and authorized to run `cdp datahub` commands against the Control Plane.
+- CDP CLI installed and configured with valid credentials
+  - Validate with `cdp environments list-environments`
 
 ### 🔑 Note on CDP CLI
 
-Ensure the **CDP CLI is installed and configured** before running the script. This script relies on the following CDP CLI commands:
+Ensure the **CDP CLI is installed and configured**. The script uses (among others):
 
-- `cdp datahub list-clusters`
-- `cdp datahub describe-cluster`
-- `cdp datahub describe-cluster-template`
-- `cdp datahub upgrade-cluster --show-available-images`
-- `cdp datahub describe-database-server`
+- Environments: `cdp environments describe-environment`, `cdp environments get-freeipa-upgrade-options`
+- DataHub: `list-clusters`, `describe-cluster`, `describe-cluster-template`, `upgrade-cluster --show-available-images`, `upgrade-cluster --show-latest-available-image-per-runtime`, `describe-database-server`, `describe-recipe`
+- Datalake: `list-datalakes`, `describe-datalake`, `describe-database-server`, `upgrade-datalake --show-available-images`, `upgrade-datalake --show-latest-available-image-per-runtime`, `describe-recipe`
+- OPDB/COD: `opdb list-databases`, `opdb describe-database`
 
 ````
 
 ## 🚀 Usage
 
 ```bash
-python discovery_datahubs_per_env.py <environment-name>
-````
+python discovery_datahubs_per_env.py \
+  --environment-name <env_name> \
+  [--output-dir <path_prefix>] \
+  [--profile <cdp_profile>] \
+  [--debug]
+```
 
 Example:
 
 ```bash
-python discovery_datahubs_per_env.py ENV_PROD_USW1
+# Minimal
+python discovery_datahubs_per_env.py --environment-name ENV_PROD_USW1
+
+# Custom output folder prefix + profile + debug
+python discovery_datahubs_per_env.py \
+  --environment-name ENV_PROD_USW1 \
+  --output-dir ./datahubs_output_ENV_PROD_USW1 \
+  --profile prod \
+  --debug
 ```
 
 ---
@@ -80,7 +90,7 @@ mkdir ~/scripts
 vi ~/scripts/discovery_datahubs_per_env.py
 
 # Run the script
-python3.11 ~/scripts/discovery_datahubs_per_env.py <environment-name>
+python3.11 ~/scripts/discovery_datahubs_per_env.py --environment-name <env_name>
 ```
 
 💡 **Note:** Ensure `cdp` CLI is installed and configured for the root user or the user running the script.
@@ -90,43 +100,59 @@ Run `cdp environments list-environments` to validate access.
 
 ## 📂 Output
 
-The script generates a timestamped directory like:
+The script creates a timestamped output directory (default: `/tmp/discovery_datahubs-<timestamp>` or `<output-dir>-<timestamp>`) and a `.tar.gz` archive. Structure example:
 
 ```
-datahubs_output_ENV_PROD_USW1_20250711XXXXXX/
-├── ENVIRONMENT_ENV_ENV_PROD_USW1_DH_<cluster>_<timestamp>.json
-├── ENVIRONMENT_ENV_ENV_PROD_USW1_DH_<cluster>_InstanceGroups_<timestamp>.csv
-├── ENVIRONMENT_ENV_ENV_PROD_USW1_DH_<cluster>_Template_<timestamp>.json
-├── ENVIRONMENT_ENV_ENV_PROD_USW1_DH_<cluster>_AvailableImages_<timestamp>.json
-├── ENVIRONMENT_ENV_ENV_PROD_USW1_DH_<cluster>_RunTimeAvailableImages_<timestamp>.json
-├── ENVIRONMENT_ENV_ENV_PROD_USW1_DH_<cluster>_DB_<timestamp>.json
-├── ALL_ENV_ENV_PROD_USW1_InstanceGroups_<timestamp>.csv
+discovery_datahubs-<timestamp>/
+├── environment/
+│   ├── ENVIRONMENT_ENV_<env>_<timestamp>.json
+│   ├── ENVIRONMENT_ENV_<env>_<timestamp>.csv
+│   ├── ENVIRONMENT_ENV_<env>_FreeIPAUpgradeOptions_<timestamp>.json
+│   └── ENVIRONMENT_ENV_<env>_FreeIPAInstanceGroups_<timestamp>.csv
+├── datalake/
+│   └── <datalakeName>/
+│       ├── ENVIRONMENT_ENV_<env>_DL_<datalakeName>_<timestamp>.json
+│       ├── ENVIRONMENT_ENV_<env>_DL_<datalakeName>_DB_<timestamp>.json
+│       ├── ENVIRONMENT_ENV_<env>_DL_<datalakeName>_AvailableImages_<timestamp>.json
+│       ├── ENVIRONMENT_ENV_<env>_DL_<datalakeName>_RunTimeAvailableImages_<timestamp>.json
+│       ├── ENVIRONMENT_ENV_<env>_DL_<datalakeName>_InstanceGroups_<timestamp>.csv
+│       └── recipes/
+│           ├── recipe_<name>.json
+│           └── recipe_<name>.sh
+├── <DataHubClusterName>/
+│   ├── ENVIRONMENT_ENV_<env>_DH_<cluster>_<timestamp>.json
+│   ├── ENVIRONMENT_ENV_<env>_DH_<cluster>_InstanceGroups_<timestamp>.csv
+│   ├── ENVIRONMENT_ENV_<env>_DH_<cluster>_Template_<timestamp>.json
+│   ├── ENVIRONMENT_ENV_<env>_DH_<cluster>_AvailableImages_<timestamp>.json
+│   ├── ENVIRONMENT_ENV_<env>_DH_<cluster>_RunTimeAvailableImages_<timestamp>.json
+│   ├── ENVIRONMENT_ENV_<env>_DH_<cluster>_DB_<timestamp>.json
+│   ├── ENVIRONMENT_ENV_<env>_DH_<cluster>_COD_<timestamp>.json   # only for COD clusters
+│   └── recipes/
+│       ├── recipe_<name>.json
+│       └── recipe_<name>.sh
+├── ALL_<env>_datahub_instance_groups.csv
+├── ALL_<env>_datalake_instance_groups.csv
+└── discovery_datahubs-<timestamp>.tar.gz
 ```
 
 ---
 
 ## 📊 CSV Fields
 
-| Field                 | Description                                 |
-| --------------------- | ------------------------------------------- |
-| environment           | CDP environment name                        |
-| clusterName           | DataHub cluster name                        |
-| instanceGroupName     | Instance group name (e.g., leader, worker)  |
-| nodeGroupRole         | Role of the node in the cluster             |
-| instanceId            | Cloud provider instance ID                  |
-| instanceType          | CDP role type (e.g., CORE, GATEWAY_PRIMARY) |
-| instanceVmType        | VM type (e.g., m5.2xlarge)                  |
-| privateIp/publicIp    | Network IPs                                 |
-| volumeCount/Size/Type | EBS volume details                          |
-| fqdn                  | Host FQDN                                   |
-| status                | Instance status (e.g., SERVICES_HEALTHY)    |
+Columns vary by resource type; inspect headers in generated CSVs for full detail. Common fields include:
+
+- DataHub: `environment`, `clusterName`, `instanceGroupName`, `nodeGroupRole`, `instanceId`, `instanceType`, `instanceVmType`, `privateIp`, `publicIp`, `fqdn`, `status`, `statusReason`, `volumeCount`, `volumeType`, `volumeSize`
+- Datalake: `environment`, `datalakeName`, `instanceGroupName`, `instanceId`, `discoveryFQDN`, `instanceStatus`, `instanceTypeVal`, `instanceVmType`, `availabilityZone`, `subnetId`, `volumeCount`, `volumeType`, `volumeSize`
+- FreeIPA: `environment`, `freeipaInstanceGroupName`, `instanceId`, `instanceStatus`, `instanceType`, `instanceVmType`, `lifeCycle`, `privateIP`, `publicIP`, `discoveryFQDN`, `volumeCount`, `volumeType`, `volumeSize`
 
 ---
 
 ## 📘 Notes
 
-- The script pretty-prints and parses the `clusterTemplateContent` embedded JSON field.
-- Output is safe to version or attach to JIRA tickets for audits or upgrade planning.
-- This is especially useful for Cloudera PS/CSA/SE teams performing environment diagnostics.
+- The script pretty-prints and parses the `clusterTemplateContent` embedded JSON field when present.
+- Recipes are described and saved as both JSON and shell script content (if available).
+- A final `.tar.gz` archive of the output directory is created for easy sharing.
+- Suitable for audits, upgrade planning, and environment diagnostics.
 
 ---
+````
