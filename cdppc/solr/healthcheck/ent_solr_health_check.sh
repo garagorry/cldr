@@ -85,12 +85,22 @@ TMP_FILE="/tmp/solr_clusterstate_$(hostname -f)_$(date +%s).json"
 
 solrctl cluster --get-clusterstate "$TMP_FILE" || { echo "❌ Failed to get cluster state"; exit 1; }
 
-JSON=$(sed -n "/^{/,\$p" "$TMP_FILE")
+#JSON=$(sed -n "/^{/,\$p" "$TMP_FILE")
+JSON=$(sed -n '/^{/,$p' "$TMP_FILE" | jq -c .)
+
 
 echo "$JSON" | jq -r '
   .cluster.collections
   | to_entries[]
-  | "✅ Collection: \(.key), Health: \(.value.health)"'
+  | (
+      "✅ Collection: \(.key)",
+      (
+        .value.shards
+        | to_entries[]
+        | "  └─ Shard: \(.key), State: \(.value.state)"
+      )
+    )
+'
 
 echo "$JSON" | jq -r '
   .cluster.collections
