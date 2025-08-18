@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# RDS Baseline Collector with CDP CLI Beta and Region Validation & Retry
+# RDS Baseline Collector with CSV Report Generation
+# Version: 2.0.0
+# Description: Collects comprehensive RDS baseline data and generates CSV reports
 set -euo pipefail
+
+SCRIPT_VERSION="2.0.0"
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -28,12 +32,35 @@ usage() {
   echo "Usage:"
   echo "  $0 <db-identifier> [--region <aws-region>]"
   echo "  $0 --cluster-crn <crn> --type <datalake|datahub> [--region <aws-region>]"
+  echo ""
+  echo "Description:"
+  echo "  This script collects comprehensive RDS baseline information and generates:"
+  echo "  - JSON files with detailed RDS metadata"
+  echo "  - CSV report with key RDS metrics"
+  echo "  - Summary JSON for quick reference"
+  echo ""
+  echo "Output files:"
+  echo "  - rds_baseline_report.csv: CSV with key RDS metrics"
+  echo "  - rds_summary.json: Summary of RDS configuration"
+  echo "  - db_instance.json: Full RDS instance details"
+  echo "  - Additional JSON files for VPC, security groups, etc."
+  echo ""
+  echo "Examples:"
+  echo "  $0 my-rds-instance --region us-east-1"
+  echo "  $0 --cluster-crn crn:cdp:datalake:us-east-1:123:cluster:my-dl --type datalake"
   exit 1
 }
 
 # Argument parsing
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --help|-h)
+      usage
+      ;;
+    --version|-v)
+      echo "RDS Baseline Collector v$SCRIPT_VERSION"
+      exit 0
+      ;;
     --region) REGION="$2"; shift 2 ;;
     --cluster-crn) CLUSTER_CRN="$2"; shift 2 ;;
     --type) CLUSTER_TYPE="$2"; shift 2 ;;
@@ -209,3 +236,115 @@ for subnet in $SUBNET_IDS; do
 done
 
 log "[✅ DONE] RDS metadata collected in: $OUTPUT_DIR"
+
+# Function to generate CSV report from collected JSON data
+generate_csv_report() {
+  local output_dir="$1"
+  local csv_file="$output_dir/rds_baseline_report.csv"
+  
+  log "[STEP] Generating CSV report..."
+  
+  # Check if required JSON files exist
+  if [[ ! -f "$output_dir/db_instance.json" ]]; then
+    echo "[ERROR] Required file db_instance.json not found"
+    return 1
+  fi
+  
+  # Validate that the JSON contains RDS instance data
+  if ! jq -e '.DBInstances[0]' "$output_dir/db_instance.json" >/dev/null 2>&1; then
+    echo "[ERROR] Invalid RDS instance data in db_instance.json"
+    return 1
+  fi
+  
+  # Create CSV header
+  cat > "$csv_file" << EOF
+Endpoint,DB Instance ID,Engine Version,Created Time,Instance Class,vCPU,RAM,Primary Storage Encryption,Primary Storage Storage Type,Primary Storage Storage (GB),Primary Storage Provisioned IOPS,Primary Storage Storage Throughput (MB/s)
+EOF
+  
+  # Extract data from JSON and append to CSV with better vCPU/RAM handling
+  if ! jq -r '
+    .DBInstances[0] | {
+      endpoint: .Endpoint.Address,
+      db_instance_id: .DBInstanceIdentifier,
+      engine_version: .EngineVersion,
+      created_time: .InstanceCreateTime,
+      instance_class: .DBInstanceClass,
+      vcpu: (.DBInstanceClass | if contains("xlarge") then "4" elif contains("large") then "2" elif contains("medium") then "1" elif contains("small") then "1" elif contains("micro") then "1" elif contains("nano") then "1" else "N/A" end),
+      ram: (.DBInstanceClass | if contains("xlarge") then "16GB" elif contains("large") then "8GB" elif contains("medium") then "4GB" elif contains("small") then "2GB" elif contains("micro") then "1GB" elif contains("nano") then "0.5GB" else "N/A" end),
+      storage_encryption: (.StorageEncrypted // false),
+      storage_type: (.StorageType // "N/A"),
+      storage_size: (.AllocatedStorage // "N/A"),
+      provisioned_iops: (.Iops // "N/A"),
+      storage_throughput: (.StorageThroughput // "N/A")
+    } | [
+      .endpoint,
+      .db_instance_id,
+      .engine_version,
+      .created_time,
+      .instance_class,
+      .vcpu,
+      .ram,
+      .storage_encryption,
+      .storage_type,
+      .storage_size,
+      .provisioned_iops,
+      .storage_throughput
+    ] | @csv
+  ' "$output_dir/db_instance.json" >> "$csv_file"; then
+    echo "[ERROR] Failed to generate CSV data from JSON"
+    return 1
+  fi
+  
+  # Also create a more detailed JSON summary for reference
+  if ! jq -r '.DBInstances[0] | {
+    endpoint: .Endpoint.Address,
+    db_instance_id: .DBInstanceIdentifier,
+    engine_version: .EngineVersion,
+    created_time: .InstanceCreateTime,
+    instance_class: .DBInstanceClass,
+          vcpu: (.DBInstanceClass | if contains("xlarge") then "4" elif contains("large") then "2" elif contains("medium") then "1" elif contains("small") then "1" elif contains("micro") then "1" elif contains("nano") then "1" else "N/A" end),
+      ram: (.DBInstanceClass | if contains("xlarge") then "16GB" elif contains("large") then "8GB" elif contains("medium") then "4GB" elif contains("small") then "2GB" elif contains("micro") then "1GB" elif contains("nano") then "0.5GB" else "N/A" end),
+    storage_encryption: (.StorageEncrypted // false),
+    storage_type: (.StorageType // "N/A"),
+    storage_size: (.AllocatedStorage // "N/A"),
+    provisioned_iops: (.Iops // "N/A"),
+    storage_throughput: (.StorageThroughput // "N/A"),
+    engine: .Engine,
+    status: .DBInstanceStatus,
+    availability_zone: .AvailabilityZone,
+    multi_az: .MultiAZ,
+    backup_retention: .BackupRetentionPeriod,
+    maintenance_window: .PreferredMaintenanceWindow,
+    backup_window: .PreferredBackupWindow
+  }' "$output_dir/db_instance.json" > "$output_dir/rds_summary.json"; then
+    echo "[ERROR] Failed to generate summary JSON"
+    return 1
+  fi
+  
+  log "[✅ CSV Report] Generated: $csv_file"
+  log "[✅ Summary JSON] Generated: $output_dir/rds_summary.json"
+  
+  # Display the CSV content
+  echo ""
+  echo "📊 RDS Baseline Report:"
+  echo "========================"
+  cat "$csv_file"
+  echo ""
+  
+  # Show summary of all generated files
+  echo "📁 Generated Files Summary:"
+  echo "============================"
+  echo "CSV Report: $csv_file"
+  echo "Summary JSON: $output_dir/rds_summary.json"
+  echo "Full Instance Details: $output_dir/db_instance.json"
+  echo "Parameter Group: $output_dir/db_parameters.json"
+  echo "Subnet Group: $output_dir/subnet_group.json"
+  echo "VPC Details: $output_dir/vpc.json"
+  echo "Security Groups: $output_dir/security_groups/"
+  echo "Subnets: $output_dir/subnets/"
+  echo ""
+  echo "💡 Tip: Open the CSV file in Excel or Google Sheets for better formatting"
+}
+
+# Generate CSV report from collected data
+generate_csv_report "$OUTPUT_DIR"
