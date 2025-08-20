@@ -9,6 +9,8 @@ This script exports **Cloudera Manager service and role configurations** into a 
 - Extracts all service- and role-level configuration values from a Cloudera Manager cluster.
 - Handles **nested XML config values** and expands them into individual key-value pairs.
 - **Sanitizes sensitive values** (passwords, tokens, credentials, etc.).
+- **Processes role config groups** with multi-line properties as single entities.
+- Creates **individual PUT payloads** for each property within role config groups.
 - Stores results in a single CSV: `all_services_config.csv`.
 - Creates a compressed archive with all JSON config exports and the CSV.
 
@@ -17,15 +19,20 @@ This script exports **Cloudera Manager service and role configurations** into a 
 ## 📦 Output Example
 
 ```
-
 /tmp/<host>/<timestamp>/
 ├── ServiceConfigs/
 │   └── <host>*<cluster>*<service>*config.json
 ├── roleConfigGroups/
-│   └── <host>*<cluster>\_<role>*config.json
-├── all\_services\_config.csv
-└── ServiceConfigs\_roleConfigGroups*<timestamp>.tgz
-
+│   └── <host>*<cluster>_<role>*config.json
+├── api_control_files/
+│   ├── service_configs/
+│   │   ├── get_service_config_calls.csv
+│   │   └── put_service_config_calls.csv
+│   └── role_configs/
+│       ├── get_role_config_calls.csv
+│       └── put_role_config_calls.csv
+├── all_services_config.csv
+└── ServiceConfigs_roleConfigGroups*<timestamp>.tgz
 ```
 
 ---
@@ -45,72 +52,13 @@ The script depends on the `xmlstarlet` utility along with several essential syst
 
 The following RPM packages are required for proper execution of the script and its dependencies:
 
-- basesystem-11-5.el8.noarch.rpm
-- bash-4.4.20-5.el8.x86_64.rpm
-- filesystem-3.8-6.el8.x86_64.rpm
-- glibc-2.28-251.el8_10.16.x86_64.rpm
-- glibc-all-langpacks-2.28-251.el8_10.16.x86_64.rpm
-- glibc-common-2.28-251.el8_10.16.x86_64.rpm
-- glibc-gconv-extra-2.28-251.el8_10.16.x86_64.rpm
-- libgcrypt-1.8.5-7.el8_6.x86_64.rpm
-- libgpg-error-1.31-1.el8.x86_64.rpm
-- libselinux-2.9-10.el8_10.x86_64.rpm
-- libsepol-2.9-3.el8.x86_64.rpm
-- libxml2-2.9.7-19.el8_10.x86_64.rpm
-- libxslt-1.1.32-6.1.el8_10.x86_64.rpm
-- ncurses-base-6.1-10.20180224.el8.noarch.rpm
-- ncurses-libs-6.1-10.20180224.el8.x86_64.rpm
-- pcre2-10.32-3.el8_6.x86_64.rpm
-- redhat-release-8.10-0.3.el8.x86_64.rpm
-- redhat-release-eula-8.10-0.3.el8.x86_64.rpm
-- setup-2.12.2-9.el8.noarch.rpm
-- tzdata-2025b-1.el8.noarch.rpm
 - xmlstarlet-1.6.1-20.el8.x86_64.rpm
-- xz-libs-5.2.4-4.el8_6.x86_64.rpm
-- zlib-1.2.11-25.el8.x86_64.rpm
 
 ## Installing `xmlstarlet` on RHEL 8.x
 
-A full set of RPMs (including dependencies) can be downloaded and installed using the steps below:
-
-### 🧰 Automated Installation
-
 ```bash
-# Step 1: Create working directory
-mkdir -p /var/tmp/xmlstarlet-rpms
-cd /var/tmp/xmlstarlet-rpms
-
-# Step 2: Download required packages
-export BASE_URL="https://github.com/garagorry/cldr/raw/refs/heads/main/cdppc/upgrades/misc/tmp_rpms/xmlstarlet-rpms"
-for package in \
-basesystem-11-5.el8.noarch.rpm \
-bash-4.4.20-5.el8.x86_64.rpm \
-filesystem-3.8-6.el8.x86_64.rpm \
-glibc-2.28-251.el8_10.16.x86_64.rpm \
-glibc-all-langpacks-2.28-251.el8_10.16.x86_64.rpm \
-glibc-common-2.28-251.el8_10.16.x86_64.rpm \
-glibc-gconv-extra-2.28-251.el8_10.16.x86_64.rpm \
-libgcrypt-1.8.5-7.el8_6.x86_64.rpm \
-libgpg-error-1.31-1.el8.x86_64.rpm \
-libselinux-2.9-10.el8_10.x86_64.rpm \
-libsepol-2.9-3.el8.x86_64.rpm \
-libxml2-2.9.7-19.el8_10.x86_64.rpm \
-libxslt-1.1.32-6.1.el8_10.x86_64.rpm \
-ncurses-base-6.1-10.20180224.el8.noarch.rpm \
-ncurses-libs-6.1-10.20180224.el8.x86_64.rpm \
-pcre2-10.32-3.el8_6.x86_64.rpm \
-redhat-release-8.10-0.3.el8.x86_64.rpm \
-redhat-release-eula-8.10-0.3.el8.x86_64.rpm \
-setup-2.12.2-9.el8.noarch.rpm \
-tzdata-2025b-1.el8.noarch.rpm \
-xmlstarlet-1.6.1-20.el8.x86_64.rpm \
-xz-libs-5.2.4-4.el8_6.x86_64.rpm \
-zlib-1.2.11-25.el8.x86_64.rpm ; do
-    wget ${BASE_URL}/${package}
-done
-
-# Step 3: Install xmlstarlet and its dependencies
-yum localinstall -y xmlstarlet-1.6.1-20.el8.x86_64.rpm
+# Install xmlstarlet and its dependencies
+yum localinstall -y https://github.com/garagorry/cldr/raw/refs/heads/main/cdppc/upgrades/misc/tmp_rpms/xmlstarlet-rpms/xmlstarlet-1.6.1-20.el8.x86_64.rpm
 ```
 
 ### ✅ Validate Installation
@@ -118,8 +66,6 @@ yum localinstall -y xmlstarlet-1.6.1-20.el8.x86_64.rpm
 ```bash
 xmlstarlet --version
 ```
-
-> **Note:** These RPM files can be organized within a local directory such as `/var/tmp/xmlstarlet-rpms/` for convenience.
 
 Once installed, you can execute the extraction script safely on your Cloudera Manager host.
 
@@ -136,10 +82,11 @@ To disable API redaction:
 ```bash
 sudo vi /etc/default/cloudera-scm-server
 # Add or modify the line:
-CMF_JAVA_OPTS="-Dcom.cloudera.api.redaction=false"
+# export CMF_JAVA_OPTS with "-Dcom.cloudera.api.redaction=false"
+export CMF_JAVA_OPTS="-Xmx4G -XX:MaxPermSize=256m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -Dcom.sun.management.jmxremote.ssl.enabled.protocols=TLSv1.2 -Dcom.cloudera.api.redaction=false"
 
 # Restart CM:
-sudo systemctl restart cloudera-scm-server
+systemctl restart cloudera-scm-server && ( tail -f -n0 /var/log/cloudera-scm-server/cloudera-scm-server.log  & ) | grep -q -i 'started jetty server'
 ```
 
 ---
@@ -147,7 +94,7 @@ sudo systemctl restart cloudera-scm-server
 ## 🚀 How to Run
 
 ```bash
-sudo ./cm_export_all_service_configs.sh
+#  ./cm_export_all_service_configs.sh
 ```
 
 You will be prompted for:
@@ -163,17 +110,163 @@ The final archive will be displayed and contains:
 
 - `ServiceConfigs/*.json`
 - `roleConfigGroups/*.json`
+- `api_control_files/` - GET and PUT API call templates
 - `all_services_config.csv`
 
 ---
 
 ## 🧪 Sample CSV Output
 
-| type    | service_or_role | property                | value         |
-| ------- | --------------- | ----------------------- | ------------- |
-| service | HDFS            | dfs.datanode.data.dir   | /data/dfs     |
-| role    | HDFS-DATANODE   | log.dir                 | /var/log/hdfs |
-| service | HIVE            | hive.metastore.password | \*\*\*\*      |
+| type    | service_or_role         | property                                            | value                                                                                                                                                                                       |
+| ------- | ----------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| service | HDFS                    | dfs.datanode.data.dir                               | /data/dfs                                                                                                                                                                                   |
+| role    | HDFS-DATANODE           | log.dir                                             | /var/log/hdfs                                                                                                                                                                               |
+| service | HIVE                    | hive.metastore.password                             | \*\*\*\*                                                                                                                                                                                    |
+| role    | atlas-ATLAS_SERVER-BASE | conf/atlas-application.properties_role_safety_valve | atlas.audit.persistEntityDefinition=false\natlas.audit.hbase.entity.spark_process.attributes.exclude=details,sparkPlanDescription\natlas.server.ha.zookeeper.session.timeout.ms=450000\n... |
+
+---
+
+## 🔧 Recent Updates & Enhancements
+
+### Role Config Groups Processing
+
+The script has been enhanced to properly handle role config groups with multi-line properties:
+
+#### **Before vs. After**
+
+- **Before**: The script only processed simple key-value pairs for role configs
+- **After**: Now handles both simple properties and complex multi-line properties (like `conf/atlas-application.properties_role_safety_valve`)
+
+#### **Individual PUT Payloads**
+
+- **Before**: Single PUT command per role config group
+- **After**: Individual PUT command for each property within a role config group (each property gets its own PUT call with its complete value)
+
+#### **Proper CSV Generation**
+
+- **Before**: Limited role config information in CSV
+- **After**: Complete role config properties with individual entries for each property
+
+### Example Role Config Output
+
+#### **For Simple Property**
+
+```
+PUT /api/v53/clusters/CLUSTER/services/atlas/roleConfigGroups/atlas-ATLAS_SERVER-BASE/config
+{
+  "items": [
+    {
+      "name": "ATLAS_SERVER_role_env_safety_valve",
+      "value": "ATLAS_CUSTOM_OPTS=-XX:MaxNewSize=3461m"
+    }
+  ]
+}
+```
+
+#### **For Multi-line Property**
+
+```
+PUT /api/v53/clusters/CLUSTER/services/atlas/roleConfigGroups/atlas-ATLAS_SERVER-BASE/config
+{
+  "items": [
+    {
+      "name": "conf/atlas-application.properties_role_safety_valve",
+      "value": "atlas.audit.persistEntityDefinition=false\natlas.audit.hbase.entity.spark_process.attributes.exclude=details,sparkPlanDescription\natlas.server.ha.zookeeper.session.timeout.ms=450000\n..."
+    }
+  ]
+}
+```
+
+---
+
+## 📋 CSV Output Structure
+
+The script now generates:
+
+1. **Master CSV**: Contains all properties with type, service/role, property name, value, and API URI
+2. **Control Files**:
+   - `get_service_config_calls.csv` - GET API calls for each service config
+   - `put_service_config_calls.csv` - PUT API calls for each service config property
+   - `get_role_config_calls.csv` - GET API calls for each role config group
+   - `put_role_config_calls.csv` - PUT API calls for each individual property
+
+---
+
+## ✅ Benefits
+
+1. **Granular Control**: Each property can be updated individually
+2. **Better Audit Trail**: Complete visibility into all service and role config properties
+3. **Proper API Payloads**: Correct JSON structure for Cloudera Manager API calls
+4. **Multi-line Support**: Handles complex properties with newline-separated values as single properties (not split into individual lines)
+5. **Consistent Processing**: Same logic used for both service and role configs
+6. **Improved Readability**: JSON payloads are properly formatted with line breaks for easier debugging
+7. **API Control Files**: Ready-to-use GET and PUT command templates for automation
+
+---
+
+## 🛠️ Technical Details
+
+### JSON Formatting Fix
+
+The script now generates properly formatted, multi-line JSON payloads instead of single-line JSON for both service and role configs:
+
+**Before (Single Line)**:
+
+```bash
+SERVICE_PUT_CMD="curl ... -d '{\"items\":[{\"name\":\"${key}\",\"value\":\"${val_cleaned}\"}]}'"
+ROLE_PUT_CMD="curl ... -d '{\"items\":[{\"name\":\"${key}\",\"value\":\"${val_cleaned}\"}]}'"
+```
+
+**After (Multi-line)**:
+
+```bash
+SERVICE_PUT_CMD="curl ... -d '{
+  \"items\": [
+    {
+      \"name\": \"${key}\",
+      \"value\": \"${val_cleaned}\"
+    }
+  ]
+}'"
+
+ROLE_PUT_CMD="curl ... -d '{
+  \"items\": [
+    {
+      \"name\": \"${key}\",
+      \"value\": \"${val_cleaned}\"
+    }
+  ]
+}'"
+```
+
+**Benefits**:
+
+- **Readability**: JSON payloads are easier to read and debug
+- **Standards**: Follows standard JSON formatting conventions
+- **Maintenance**: Easier to maintain and modify the script
+- **Validation**: Still generates valid JSON that can be parsed by APIs
+- **Consistency**: Both service and role configs use the same formatting style
+
+### Multi-line Value Handling
+
+The `sanitize_role_value` function now properly converts actual newlines to `\n` escape sequences for JSON compatibility:
+
+```bash
+sanitize_role_value() {
+    local val="$1"
+    # Use jq to properly escape the value for JSON (this handles newlines correctly)
+    # Remove the outer quotes that jq adds since we're building JSON manually
+    printf '%s' "$val" | sed 's/{{CM_AUTO_TLS}}/****/g' | sed 's/"/""/g' | jq -Rs . | sed 's/^"//;s/"$//'
+}
+```
+
+**Key changes**:
+
+- **Newline conversion**: `jq -Rs .` automatically converts actual newlines to `\n` escape sequences
+- **JSON compatibility**: Ensures the generated JSON payload is valid and can be parsed by JSON parsers
+- **Regex preservation**: Maintains regex patterns like `sandbox_.*\..*` without breaking JSON syntax
+- **Reliable escaping**: Uses `jq` which is designed to handle JSON escaping properly
+- **Quote handling**: Removes outer quotes from jq output since we're building JSON structure manually
 
 ---
 
@@ -181,3 +274,6 @@ The final archive will be displayed and contains:
 
 - Sensitive fields are automatically masked.
 - Output folder is generated under `/tmp/<hostname>/<timestamp>`.
+- Multi-line properties in role configs are preserved as single entities with `\n` separators.
+- Generated PUT commands are ready for direct use with Cloudera Manager API.
+- All JSON payloads are properly formatted and valid for API consumption.

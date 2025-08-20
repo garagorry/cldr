@@ -65,6 +65,15 @@ sanitize_value() {
     echo "$val" | sed 's/{{CM_AUTO_TLS}}/****/g' | tr -d '\n' | sed 's/"/""/g'
 }
 
+# Helper: Clean up AUTO_TLS references and escape quotes for role configs (convert newlines to \n for JSON)
+sanitize_role_value() {
+    local val="$1"
+    # Use printf to preserve the value exactly, then replace newlines with \n
+    # Use jq to properly escape the value for JSON (this handles newlines correctly)
+    # Remove the outer quotes that jq adds since we're building JSON manually
+    printf '%s' "$val" | sed 's/{{CM_AUTO_TLS}}/****/g' | sed 's/"/""/g' | jq -Rs . | sed 's/^"//;s/"$//'
+}
+
 # Function: Fetch service and role config values and write to master CSV
 do_get_roles_configs () {
     local timestamp=$(date +"%Y%m%d%H%M%S")
@@ -111,28 +120,42 @@ do_get_roles_configs () {
         curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
             -X GET "$SERVICE_API_URI" \
             | tee "$SERVICE_JSON_FILE" \
-            | jq -r '.items[] | "\(.name)=\(.value)"' \
-            | while IFS= read -r line; do
-                key="${line%%=*}"
-                val="${line#*=}"
+            | jq -c '.items[]' \
+            | while IFS= read -r item; do
+                key=$(echo "$item" | jq -r '.name')
+                val=$(echo "$item" | jq -r '.value')
                 val_cleaned=$(sanitize_value "$val")
 
                 if [[ "$val_cleaned" == \<property* ]]; then
-                    while IFS= read -r subline; do
-                        sub_key="${subline%%=*}"
-                        sub_val="${subline#*=}"
+                    while IFS='|' read -r sub_key sub_val; do
                         is_sensitive_property "$sub_key" && sub_val="****"
                         echo "service,${CLUSTER_SERVICE_NAME},${sub_key},\"${sub_val}\",\"${SERVICE_API_URI}\"" >> "$MASTER_CSV_FILE"
                         # Write PUT API call for service config property
-                        SERVICE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config\" -H 'content-type:application/json' -d '{\"items\":[{\"name\":\"${sub_key}\",\"value\":\"${sub_val}\"}]}'"
+                        # Generate properly formatted, multi-line JSON payload
+                        SERVICE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config\" -H 'content-type:application/json' -d '{
+  \"items\": [
+    {
+      \"name\": \"${sub_key}\",
+      \"value\": \"${sub_val}\"
+    }
+  ]
+}'"
                         echo "${CLUSTER_SERVICE_NAME},${sub_key},${SERVICE_PUT_CMD}" >> "$SERVICE_PUT_CONTROL"
                     done < <(echo "<configuration>${val_cleaned}</configuration>" \
-                        | xmlstarlet sel -t -m "//property" -v "concat(name,'=',value)" -n)
+                        | xmlstarlet sel -t -m "//property" -v "concat(name,'|',value)" -n)
                 else
                     is_sensitive_property "$key" && val_cleaned="****"
                     echo "service,${CLUSTER_SERVICE_NAME},${key},\"${val_cleaned}\",\"${SERVICE_API_URI}\"" >> "$MASTER_CSV_FILE"
                     # Write PUT API call for service config property
-                    SERVICE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config\" -H 'content-type:application/json' -d '{\"items\":[{\"name\":\"${key}\",\"value\":\"${val_cleaned}\"}]}'"
+                    # Generate properly formatted, multi-line JSON payload
+                    SERVICE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/config\" -H 'content-type:application/json' -d '{
+  \"items\": [
+    {
+      \"name\": \"${key}\",
+      \"value\": \"${val_cleaned}\"
+    }
+  ]
+}'"
                     echo "${CLUSTER_SERVICE_NAME},${key},${SERVICE_PUT_CMD}" >> "$SERVICE_PUT_CONTROL"
                 fi
             done
@@ -149,16 +172,27 @@ do_get_roles_configs () {
 
             curl -s -L -k -u "${WORKLOAD_USER}:${WORKLOAD_USER_PASS}" \
                 -X GET "$ROLE_API_URI" \
-                | tee -a "$ROLE_JSON_FILE" \
-                | jq -r '.items[] | "\(.name)=\(.value)"' \
-                | while IFS= read -r line; do
-                    key="${line%%=*}"
-                    val="${line#*=}"
-                    val_cleaned=$(sanitize_value "$val")
+                | tee "$ROLE_JSON_FILE" \
+                | jq -c '.items[]' \
+                | while IFS= read -r item; do
+                    key=$(echo "$item" | jq -r '.name')
+                    val=$(echo "$item" | jq -r '.value')
+                    val_cleaned=$(sanitize_role_value "$val")
+                    
+                    # For role configs, treat all properties as single properties with their complete values
                     is_sensitive_property "$key" && val_cleaned="****"
                     echo "role,${ROLE},${key},\"${val_cleaned}\",\"${ROLE_API_URI}\"" >> "$MASTER_CSV_FILE"
-                    # Write PUT API call for role config property
-                    ROLE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups/${ROLE}/config\" -H 'content-type:application/json' -d '{\"items\":[{\"name\":\"${key}\",\"value\":\"${val_cleaned}\"}]}'"
+                    
+                    # Write PUT API call for role config property - single payload per property
+                    # Generate properly formatted, multi-line JSON payload
+                    ROLE_PUT_CMD="curl -s -L -k -u \"\${WORKLOAD_USER}:*****\" -X PUT \"${CM_SERVER}/api/${API_VERSION}/clusters/${CM_CLUSTER_NAME}/services/${CLUSTER_SERVICE_NAME}/roleConfigGroups/${ROLE}/config\" -H 'content-type:application/json' -d '{
+  \"items\": [
+    {
+      \"name\": \"${key}\",
+      \"value\": \"${val_cleaned}\"
+    }
+  ]
+}'"
                     echo "${CLUSTER_SERVICE_NAME},${ROLE},${key},${ROLE_PUT_CMD}" >> "$ROLE_PUT_CONTROL"
                 done
         done
