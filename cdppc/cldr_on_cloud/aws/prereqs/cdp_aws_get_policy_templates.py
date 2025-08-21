@@ -91,7 +91,12 @@ def main():
             policy_base64 = policy.get("policyJson", None)
 
             if service and policy_base64:
-                print(f"  [{i}/{len(policies)}] �� Decoding policy for service: {service}")
+                # Skip DynamoDB policies
+                if service.lower() == "dynamodb":
+                    print(f"  [{i}/{len(policies)}] ⏭️ Skipping DynamoDB policy")
+                    continue
+                
+                print(f"  [{i}/{len(policies)}] 🔓 Decoding policy for service: {service}")
                 decoded_policy = base64.b64decode(policy_base64).decode('utf-8')
                 decoded_policy_json = json.loads(decoded_policy)
 
