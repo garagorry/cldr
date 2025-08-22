@@ -100,12 +100,57 @@ class ConfigComparator:
         config_files = {}
         
         for json_file in directory.rglob("*.json"):
-            # Extract service/role name from filename
-            filename = json_file.stem
-            if filename not in config_files:
-                config_files[filename] = json_file
+            # Create a normalized key for matching files between source and target
+            # Extract the meaningful part of the filename (service/role name)
+            normalized_key = self.normalize_filename(json_file.name)
+            if normalized_key:
+                config_files[normalized_key] = json_file
                 
         return config_files
+    
+    def normalize_filename(self, filename: str) -> str:
+        """
+        Normalize filename to create a matching key between source and target.
+        
+        Examples:
+        - 'jdga-saf02-aw-dl-gateway1.jdga-saf.a465-9q4k.cloudera.site_jdga-saf02-aw-dl_all_services_config_20250822152126.json'
+          -> 'all_services_config'
+        - 'jdga-saf02-aw-dl-gateway1.jdga-saf.a465-9q4k.cloudera.site_jdga-saf02-aw-dl_atlas_atlas-ATLAS_SERVER-BASE_config.json'
+          -> 'atlas_atlas-ATLAS_SERVER-BASE_config'
+        """
+        # Remove file extension
+        name_without_ext = filename.replace('.json', '')
+        
+        # Split by underscores and look for meaningful parts
+        parts = name_without_ext.split('_')
+        
+        # Look for service names or role names
+        if len(parts) >= 3:
+            # Try to find service/role patterns
+            for i, part in enumerate(parts):
+                if part in ['atlas', 'hive', 'hdfs', 'yarn', 'zookeeper', 'kafka', 'spark', 'impala', 'solr', 'kudu', 'flink', 'nifi', 'oozie', 'hue', 'ranger', 'knox', 'livy', 'zeppelin', 'superset', 'airflow', 'presto', 'trino', 'druid', 'kylin', 'phoenix', 'accumulo', 'storm', 'samza', 'beam', 'flume', 'sqoop', 'kafka-connect', 'schema-registry', 'ksql', 'control-center', 'cruise-control', 'rest-proxy', 'kafka-rest', 'kafka-mirror-maker', 'kafka-streams', 'kafka-connect', 'kafka-rest', 'kafka-mirror-maker', 'kafka-streams']:
+                    # Found a service name, include it and following parts
+                    if i + 1 < len(parts):
+                        return '_'.join(parts[i:])
+                    else:
+                        return part
+                elif part.startswith('MGMT-'):
+                    # Found MGMT role group
+                    return part
+                elif 'config' in part:
+                    # Found config keyword, include previous parts
+                    if i > 0:
+                        return '_'.join(parts[i-1:])
+                    else:
+                        return part
+        
+        # Fallback: return the last meaningful part
+        if len(parts) >= 2:
+            return '_'.join(parts[-2:])
+        elif len(parts) == 1:
+            return parts[0]
+        
+        return filename  # Return original if no pattern found
     
     def compare_configs(self) -> List[Dict[str, Any]]:
         """Compare configurations between source and target directories."""
@@ -243,6 +288,29 @@ class ConfigComparator:
         """Generate a CSV report with the differences."""
         if not differences:
             print("No differences found. Configurations are identical.")
+            # Still create a CSV file with a summary row
+            with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = [
+                    'filename', 'property_name', 'source_value', 'target_value', 
+                    'action', 'put_command', 'source_file', 'target_file'
+                ]
+                
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                # Add a summary row
+                writer.writerow({
+                    'filename': 'SUMMARY',
+                    'property_name': 'No differences found',
+                    'source_value': 'Configurations are identical',
+                    'target_value': 'Configurations are identical',
+                    'action': 'NONE',
+                    'put_command': 'No action required',
+                    'source_file': 'N/A',
+                    'target_file': 'N/A'
+                })
+            
+            print(f"Summary CSV created: {output_file}")
             return
             
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
@@ -266,7 +334,7 @@ class ConfigComparator:
             action = diff['action']
             action_counts[action] = action_counts.get(action, 0) + 1
         
-        print("\nSummary by action type:")
+        print("Summary by action type:")
         for action, count in action_counts.items():
             print(f"  {action}: {count} properties")
 
