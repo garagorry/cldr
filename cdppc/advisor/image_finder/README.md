@@ -59,18 +59,42 @@ python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8db
 python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8dbc-13c2cdc0dd5c --cloud-provider aws --output-folder /path/to/reports --csv-output my_report.csv
 ```
 
+**Limit to latest 3 images (console shows only latest, CSV contains limited images):**
+
+```bash
+python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8dbc-13c2cdc0dd5c --cloud-provider aws --newer 3
+```
+
 ### Command Line Arguments
 
 - `--source-imageId`: **Required**. The UUID of the source image to analyze
 - `--cloud-provider`: **Required**. Target cloud provider (`aws`, `azure`, or `gcp`)
 - `--catalog-url`: **Optional**. Custom image catalog URL (defaults to the official Cloudbreak catalog)
 - `--csv-output`: **Optional**. Custom CSV output filename
-- `--newer`: **Optional**. Limit the number of newer images to show (e.g., `--newer 3` for latest 3 images)
-- `--output-folder`: **Optional**. Output folder for CSV report (default: `/tmp/runtime_image_<timestamp>`)
+- `--newer`: **Optional**. Limit the number of newer images to show (e.g., `--newer 3` for latest 3 images). When not provided or > 1, console report shows only the latest image, but CSV contains all available/limited images.
+- `--output-folder`: **Optional**. Output folder for CSV report (will append `_<timestamp>` to folder name)
 
 ## Output
 
-The tool generates a comprehensive report that includes:
+The tool generates both a console report and a CSV file:
+
+### Console Report Behavior
+
+- **No `--newer` parameter**: Shows only the latest candidate image with a note that CSV contains all available images
+- **`--newer 1`**: Shows the single latest candidate image
+- **`--newer > 1`**: Shows only the latest candidate image with a note that CSV contains the limited candidate images
+
+### CSV Report Behavior
+
+The CSV contains all candidate images based on the `--newer` parameter:
+
+- **No `--newer` parameter**: Contains all available candidate images with all regions
+- **`--newer 1`**: Contains 1 candidate image with all regions
+- **`--newer > 1`**: Contains the limited candidate images with all regions
+- **Source image**: Always 1 row with all details
+- **Complete data**: Full package versions, repository information, and region-specific image IDs
+
+### Report Content
 
 ### Source Image Information
 
@@ -164,10 +188,10 @@ The tool handles various error scenarios:
 The tool automatically creates output folders and manages CSV file placement:
 
 - **Default behavior**: Creates `/tmp/runtime_image_<timestamp>/` folder with auto-generated CSV filename
-- **Custom folder**: Uses specified `--output-folder` with auto-generated CSV filename
-- **Custom folder + filename**: Uses specified `--output-folder` and `--csv-output` filename
+- **Custom folder**: Automatically appends `_<timestamp>` to the specified `--output-folder` name
+- **Custom folder + filename**: Uses timestamped folder with specified `--csv-output` filename
 - **Auto-creation**: Output folders are automatically created if they don't exist
-- **Timestamp format**: Default folder names use format `YYYYMMDD_HHMMSS`
+- **Timestamp format**: All folder names use format `YYYYMMDD_HHMMSS`
 
 ## Notes
 

@@ -36,21 +36,6 @@ class RuntimeImageCandidateFinder:
             response.raise_for_status()
             self.catalog_data = response.json()
             print("✓ Successfully fetched image catalog")
-            
-            # Show catalog structure
-            print(f"  Catalog keys: {list(self.catalog_data.keys())}")
-            if 'versions' in self.catalog_data:
-                versions = self.catalog_data['versions']
-                print(f"  Versions count: {len(versions)}")
-                if len(versions) > 0 and hasattr(versions, '__getitem__'):
-                    try:
-                        print(f"  First version type: {type(versions[0]).__name__}")
-                        print(f"  First version: {versions[0]}")
-                    except (IndexError, KeyError, TypeError):
-                        print(f"  Versions structure: {type(versions)}")
-            if 'images' in self.catalog_data and 'base-images' in self.catalog_data['images']:
-                print(f"  Base-images count: {len(self.catalog_data['images']['base-images'])}")
-            
             return True
         except requests.RequestException as e:
             print(f"✗ Error fetching catalog: {e}")
@@ -66,43 +51,30 @@ class RuntimeImageCandidateFinder:
             
         # Search in base-images
         if 'images' in self.catalog_data and 'base-images' in self.catalog_data['images']:
-            print(f"  Searching in base-images section...")
             for base_image in self.catalog_data['images']['base-images']:
                 if base_image.get('uuid') == source_uuid:
-                    print(f"  ✓ Found in base-images")
                     return base_image
         
         # Search in versions - handle both direct images and nested structures
         if 'versions' in self.catalog_data:
-            print(f"  Searching in versions section ({len(self.catalog_data['versions'])} versions)...")
             for i, version in enumerate(self.catalog_data['versions']):
                 # Skip if version is not a dictionary
                 if not isinstance(version, dict):
-                    print(f"    Version {i+1}: skipping (not a dictionary)")
                     continue
                 
                 # Check if version has direct images
                 if 'images' in version:
-                    print(f"    Version {i+1}: checking {len(version['images'])} images")
                     for image in version['images']:
                         if isinstance(image, dict) and image.get('uuid') == source_uuid:
-                            print(f"    ✓ Found in version {i+1} images")
                             return image
                 
                 # Check if version itself is an image
                 if version.get('uuid') == source_uuid:
-                    print(f"    ✓ Found as version {i+1} itself")
                     return version
         
         # Search recursively in the entire catalog structure
-        print(f"  Searching recursively in catalog...")
         found_image = self._search_recursively(self.catalog_data, source_uuid)
-        if found_image:
-            print(f"  ✓ Found recursively")
-            return found_image
-        
-        print(f"  ✗ Image not found in any section")
-        return None
+        return found_image
     
     def _search_recursively(self, data, target_uuid: str) -> Optional[Dict]:
         """Recursively search for an image with the target UUID"""
@@ -326,6 +298,10 @@ class RuntimeImageCandidateFinder:
         if not output_folder:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_folder = f"/tmp/runtime_image_{timestamp}"
+        else:
+            # Append timestamp to custom output folder
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_folder = f"{output_folder}_{timestamp}"
         
         # Create output folder if it doesn't exist
         import os
@@ -436,50 +412,46 @@ class RuntimeImageCandidateFinder:
             return False
         
         # Find source image
-        print(f"Searching for source image: {source_uuid}")
         source_image = self.find_source_image(source_uuid)
         
         if not source_image:
             print(f"✗ Source image with UUID {source_uuid} not found in catalog")
             return False
         
-        print("✓ Source image found")
-        
-        # Get source timestamp
+        # Get source timestamp and architecture
         source_timestamp = self.get_image_timestamp(source_image)
-        
-        # Get source architecture
         source_architecture = source_image.get('architecture', 'unknown')
-        print(f"Source image architecture: {source_architecture}")
         
         # Find newer images
-        print(f"Searching for newer {cloud_provider} images with {source_architecture} architecture...")
         newer_images = self.find_newer_images(source_image, cloud_provider, source_timestamp, source_architecture)
+        
+        # Store original count before limiting
+        original_count = len(newer_images)
         
         # Apply newer limit if specified
         if newer_limit and newer_limit > 0:
-            print(f"Limiting results to latest {newer_limit} images")
             newer_images = newer_images[:newer_limit]
         
         print(f"✓ Found {len(newer_images)} runtime image candidates with {source_architecture} architecture")
         
-        # Generate and display report
-        report = self.generate_report(source_image, newer_images, cloud_provider)
-        print("\n" + report)
-        
-        # Generate CSV report
-        csv_file = self.generate_csv_report(source_image, newer_images, cloud_provider, csv_output, output_folder)
-        print(f"\n✓ Runtime image candidates CSV report generated: {csv_file}")
-        
-        # Show CSV summary
-        total_rows = 1  # Source image
-        for image in newer_images:
-            if 'images' in image and cloud_provider in image['images']:
-                total_rows += len(image['images'][cloud_provider])
+        # Generate and display report (show only latest image by default, or when newer_limit > 1)
+        if not newer_limit or newer_limit > 1:
+            # For display, show only the latest image
+            display_images = newer_images[:1] if newer_images else []
+            report = self.generate_report(source_image, display_images, cloud_provider)
+            print("\n" + report)
+            if newer_limit and newer_limit > 1:
+                print(f"Note: Showing latest image only. CSV contains the {len(newer_images)} limited candidate images.")
             else:
-                total_rows += 1
+                print(f"Note: Showing latest image only. CSV contains all {original_count} available candidate images.")
+        else:
+            # Show all images in report (when newer_limit = 1)
+            report = self.generate_report(source_image, newer_images, cloud_provider)
+            print("\n" + report)
         
-        print(f"  CSV contains {total_rows} total rows (1 source + {len(newer_images)} runtime image candidates with all regions)")
+        # Generate CSV report (always include all images)
+        csv_file = self.generate_csv_report(source_image, newer_images, cloud_provider, csv_output, output_folder)
+        print(f"✓ CSV report generated: {csv_file}")
         
         return True
 
@@ -495,7 +467,7 @@ Examples:
   python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8dbc-13c2cdc0dd5c --cloud-provider gcp
   python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8dbc-13c2cdc0dd5c --cloud-provider aws --csv-output my_report.csv
   python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8dbc-13c2cdc0dd5c --cloud-provider aws --newer 3
-  python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8dbc-13c2cdc0dd5c --cloud-provider aws --output-folder /path/to/reports
+  python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8dbc-13c2cdc0dd5c --cloud-provider aws --output-folder ./reports
         """
     )
     
@@ -531,7 +503,7 @@ Examples:
     
     parser.add_argument(
         '--output-folder',
-        help='Output folder for CSV report (default: /tmp/runtime_image_<timestamp>)'
+        help='Output folder for CSV report (will append _<timestamp> to folder name)'
     )
     
     args = parser.parse_args()
