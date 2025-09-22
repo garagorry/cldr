@@ -6,9 +6,11 @@ This script analyzes the Cloudbreak image catalog to find runtime image candidat
 - Source image ID (UUID)
 - Cloud provider (aws, azure, gcp)
 - Image creation/published dates
+- Version compatibility (same or newer release)
 
 The script identifies newer images that can be used as base images for creating custom runtime images
-or for external tools to copy and prepare custom images.
+or for external tools to copy and prepare custom images. It ensures version compatibility by showing
+only images with newer version numbers (e.g., 7.2.17 -> 7.2.18, 7.3.1; 7.3.1 -> 7.3.2, 7.4.0).
 
 Usage:
     python runtime_image_candidate_finder.py --source-imageId <uuid> --cloud-provider <aws|azure|gcp>
@@ -101,45 +103,98 @@ class RuntimeImageCandidateFinder:
         """Get the timestamp for comparison (prefer created, fallback to published)"""
         return image.get('created', image.get('published', 0))
     
-    def find_newer_images(self, source_image: Dict, cloud_provider: str, source_timestamp: int, source_architecture: str) -> List[Dict]:
+    def extract_version(self, image: Dict) -> Optional[str]:
+        """Extract version from image (repository-version or version field)"""
+        version_str = None
+        
+        # Try to get repository-version first
+        if 'stack-details' in image and 'repo' in image['stack-details']:
+            repo_info = image['stack-details']['repo']
+            if 'stack' in repo_info and 'repository-version' in repo_info['stack']:
+                version_str = repo_info['stack']['repository-version']
+        
+        # Fallback to version field
+        if not version_str and 'version' in image:
+            version_str = image['version']
+        
+        return version_str
+    
+    def parse_version(self, version_str: str) -> Optional[Tuple[int, int, int]]:
+        """Parse version string like '7.2.17' or '7.3.1-1.cdh7.3.1.p400.67986116' into (major, minor, patch) tuple"""
+        if not version_str:
+            return None
+        
+        try:
+            if '.p' in version_str and '-1.cdh' in version_str:
+                version_part = version_str.split('-')[0]
+                patch_part = version_str.split('.p')[1].split('.')[0]
+                
+                version_parts = version_part.split('.')
+                major = int(version_parts[0]) if len(version_parts) > 0 else 0
+                minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+                patch = int(patch_part)
+                return (major, minor, patch)
+            else:
+                parts = version_str.split('.')
+                major = int(parts[0]) if len(parts) > 0 else 0
+                minor = int(parts[1]) if len(parts) > 1 else 0
+                patch = int(parts[2]) if len(parts) > 2 else 0
+                return (major, minor, patch)
+        except (ValueError, IndexError):
+            return None
+    
+    def is_compatible_version(self, source_version: str, candidate_version: str) -> bool:
+        """Check if candidate version is newer release than source version"""
+        source_parsed = self.parse_version(source_version)
+        candidate_parsed = self.parse_version(candidate_version)
+        
+        if not source_parsed or not candidate_parsed:
+            return True
+        
+        source_major, source_minor, source_patch = source_parsed
+        candidate_major, candidate_minor, candidate_patch = candidate_parsed
+        
+        if candidate_major == source_major:
+            if candidate_minor > source_minor:
+                return True
+            elif candidate_minor == source_minor:
+                return candidate_patch > source_patch
+            else:
+                return False
+        
+        return candidate_major > source_major
+    
+    def find_newer_images(self, source_image: Dict, cloud_provider: str, source_timestamp: int, source_architecture: str, source_version: str) -> List[Dict]:
         """Find newer images for the specified cloud provider"""
         newer_images = []
         
         if not self.catalog_data:
             return newer_images
         
-        # Search in base-images
         if 'images' in self.catalog_data and 'base-images' in self.catalog_data['images']:
             for base_image in self.catalog_data['images']['base-images']:
-                if self._is_newer_image(base_image, source_timestamp, cloud_provider, source_architecture):
+                if self._is_newer_image(base_image, source_timestamp, cloud_provider, source_architecture, source_version):
                     newer_images.append(base_image)
         
-        # Search in versions - handle both direct images and nested structures
         if 'versions' in self.catalog_data:
             for version in self.catalog_data['versions']:
-                # Skip if version is not a dictionary
                 if not isinstance(version, dict):
                     continue
                 
-                # Check if version has direct images
                 if 'images' in version:
                     for image in version['images']:
-                        if isinstance(image, dict) and self._is_newer_image(image, source_timestamp, cloud_provider, source_architecture):
+                        if isinstance(image, dict) and self._is_newer_image(image, source_timestamp, cloud_provider, source_architecture, source_version):
                             newer_images.append(image)
                 
-                # Check if version itself is an image
-                if self._is_newer_image(version, source_timestamp, cloud_provider, source_architecture):
+                if self._is_newer_image(version, source_timestamp, cloud_provider, source_architecture, source_version):
                     newer_images.append(version)
         
-        # Also search recursively for any images we might have missed
         all_images = self._find_all_images_recursively(self.catalog_data)
         for image in all_images:
-            if self._is_newer_image(image, source_timestamp, cloud_provider, source_architecture):
-                # Avoid duplicates
+            if self._is_newer_image(image, source_timestamp, cloud_provider, source_architecture, source_version):
                 if not any(existing.get('uuid') == image.get('uuid') for existing in newer_images):
                     newer_images.append(image)
         
-        # Sort by timestamp (newest first)
         newer_images.sort(key=lambda x: self.get_image_timestamp(x), reverse=True)
         return newer_images
     
@@ -148,45 +203,48 @@ class RuntimeImageCandidateFinder:
         images = []
         
         if isinstance(data, dict):
-            # Check if this dict is an image (has uuid and images fields)
             if data.get('uuid') and 'images' in data:
                 images.append(data)
             
-            # Recursively search in all values
             for key, value in data.items():
                 images.extend(self._find_all_images_recursively(value))
         elif isinstance(data, list):
-            # Recursively search in all list items
             for item in data:
                 images.extend(self._find_all_images_recursively(item))
         
         return images
     
-    def _is_newer_image(self, image: Dict, source_timestamp: int, cloud_provider: str, source_architecture: str) -> bool:
-        """Check if an image is newer and supports the specified cloud provider and architecture"""
+    def _is_newer_image(self, image: Dict, source_timestamp: int, cloud_provider: str, source_architecture: str, source_version: str) -> bool:
+        """Check if an image is newer and supports the specified cloud provider, architecture, and version"""
         image_timestamp = self.get_image_timestamp(image)
         
-        # Must be newer than source
         if image_timestamp <= source_timestamp:
             return False
         
-        # Must have the same architecture as source
         if image.get('architecture') != source_architecture:
             return False
         
-        # Must support the specified cloud provider
         if 'images' not in image:
             return False
             
-        # Check if cloud provider is supported
         if cloud_provider == 'aws':
-            return 'aws' in image['images']
+            if 'aws' not in image['images']:
+                return False
         elif cloud_provider == 'azure':
-            return 'azure' in image['images']
+            if 'azure' not in image['images']:
+                return False
         elif cloud_provider == 'gcp':
-            return 'gcp' in image['images']
+            if 'gcp' not in image['images']:
+                return False
+        else:
+            return False
         
-        return False
+        candidate_version = self.extract_version(image)
+        if candidate_version and source_version:
+            if not self.is_compatible_version(source_version, candidate_version):
+                return False
+        
+        return True
     
     def format_timestamp(self, timestamp: int) -> str:
         """Convert Unix timestamp to readable date"""
@@ -203,7 +261,6 @@ class RuntimeImageCandidateFinder:
         report.append("=" * 80)
         report.append("")
         
-        # Source image info
         report.append("SOURCE IMAGE:")
         report.append(f"  UUID: {source_image.get('uuid', 'N/A')}")
         report.append(f"  Date: {source_image.get('date', 'N/A')}")
@@ -213,7 +270,10 @@ class RuntimeImageCandidateFinder:
         report.append(f"  OS Type: {source_image.get('os_type', 'N/A')}")
         report.append(f"  Architecture: {source_image.get('architecture', 'N/A')}")
         
-        # Repository version information for source image
+        source_version = self.extract_version(source_image)
+        if source_version:
+            report.append(f"  Version: {source_version}")
+        
         if 'stack-details' in source_image and 'repo' in source_image['stack-details']:
             repo_info = source_image['stack-details']['repo']
             if 'stack' in repo_info and 'repository-version' in repo_info['stack']:
@@ -227,7 +287,6 @@ class RuntimeImageCandidateFinder:
         
         report.append("")
         
-        # Candidate images
         if newer_images:
             report.append(f"CANDIDATE IMAGES FOR {cloud_provider.upper()} ({len(newer_images)} found):")
             report.append("-" * 60)
@@ -243,37 +302,38 @@ class RuntimeImageCandidateFinder:
                 report.append(f"  OS Type: {image.get('os_type', 'N/A')}")
                 report.append(f"  Architecture: {image.get('architecture', 'N/A')}")
                 
-                # Cloud provider specific details
+                candidate_version = self.extract_version(image)
+                if candidate_version:
+                    report.append(f"  Version: {candidate_version}")
+                
                 if 'images' in image and cloud_provider in image['images']:
                     cloud_images = image['images'][cloud_provider]
                     if cloud_provider == 'aws':
                         report.append(f"  AWS Regions: {len(cloud_images)} regions available")
-                        for region, ami in list(cloud_images.items())[:5]:  # Show first 5 regions
+                        for region, ami in list(cloud_images.items())[:5]:
                             report.append(f"    {region}: {ami}")
                         if len(cloud_images) > 5:
                             report.append(f"    ... and {len(cloud_images) - 5} more regions")
                     elif cloud_provider == 'azure':
                         report.append(f"  Azure Regions: {len(cloud_images)} regions available")
-                        for region, vhd_url in list(cloud_images.items())[:5]:  # Show first 5 regions
+                        for region, vhd_url in list(cloud_images.items())[:5]:
                             report.append(f"    {region}: {vhd_url[:50]}...")
                         if len(cloud_images) > 5:
                             report.append(f"    ... and {len(cloud_images) - 5} more regions")
                     elif cloud_provider == 'gcp':
                         report.append(f"  GCP Regions: {len(cloud_images)} regions available")
-                        for region, image_name in list(cloud_images.items())[:5]:  # Show first 5 regions
+                        for region, image_name in list(cloud_images.items())[:5]:
                             report.append(f"    {region}: {image_name}")
                         if len(cloud_images) > 5:
                             report.append(f"    ... and {len(cloud_images) - 5} more regions")
                 
-                # Package versions if available
                 if 'package-versions' in image:
                     report.append(f"  Package Versions:")
-                    for pkg, version in list(image['package-versions'].items())[:5]:  # Show first 5 packages
+                    for pkg, version in list(image['package-versions'].items())[:5]:
                         report.append(f"    {pkg}: {version}")
                     if len(image['package-versions']) > 5:
                         report.append(f"    ... and {len(image['package-versions']) - 5} more packages")
                 
-                # Repository version information
                 if 'stack-details' in image and 'repo' in image['stack-details']:
                     repo_info = image['stack-details']['repo']
                     if 'stack' in repo_info and 'repository-version' in repo_info['stack']:
@@ -294,29 +354,23 @@ class RuntimeImageCandidateFinder:
     
     def generate_csv_report(self, source_image: Dict, newer_images: List[Dict], cloud_provider: str, output_file: str = None, output_folder: str = None) -> str:
         """Generate a CSV report with all image details including all regions"""
-        # Determine output folder
         if not output_folder:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_folder = f"/tmp/runtime_image_{timestamp}"
         else:
-            # Append timestamp to custom output folder
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_folder = f"{output_folder}_{timestamp}"
         
-        # Create output folder if it doesn't exist
         import os
         os.makedirs(output_folder, exist_ok=True)
         
-        # Determine output filename
         if not output_file:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = f"runtime_image_candidates_{cloud_provider}_{timestamp}.csv"
         
-        # Combine folder and filename
         full_output_path = os.path.join(output_folder, output_file)
         
         with open(full_output_path, 'w', newline='', encoding='utf-8') as csvfile:
-            # Define CSV headers
             headers = [
                 'Image_Type', 'UUID', 'Date', 'Created', 'Published', 'OS', 'OS_Type', 'Architecture',
                 'Repository_Version', 'Repository_ID', 'Build_Number', 'Version',
@@ -326,11 +380,9 @@ class RuntimeImageCandidateFinder:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
             writer.writeheader()
             
-            # Write source image row
             source_row = self._create_image_row(source_image, 'SOURCE', cloud_provider)
             writer.writerow(source_row)
             
-            # Write candidate images rows
             for image in newer_images:
                 image_rows = self._create_image_rows(image, 'CANDIDATE', cloud_provider)
                 for row in image_rows:
@@ -340,7 +392,6 @@ class RuntimeImageCandidateFinder:
     
     def _create_image_row(self, image: Dict, image_type: str, cloud_provider: str) -> Dict:
         """Create a single CSV row for an image"""
-        # Get repository version info
         repo_version = 'N/A'
         repo_id = 'N/A'
         if 'stack-details' in image and 'repo' in image['stack-details']:
@@ -352,10 +403,8 @@ class RuntimeImageCandidateFinder:
         elif 'version' in image:
             repo_version = image['version']
         
-        # Get package versions list
         package_versions = image.get('package-versions', {})
         if package_versions:
-            # Convert package versions dict to a formatted string
             package_list = []
             for pkg, version in package_versions.items():
                 package_list.append(f"{pkg}: {version}")
@@ -363,7 +412,6 @@ class RuntimeImageCandidateFinder:
         else:
             package_versions_str = 'N/A'
         
-        # Create base row
         row = {
             'Image_Type': image_type,
             'UUID': image.get('uuid', 'N/A'),
@@ -392,14 +440,12 @@ class RuntimeImageCandidateFinder:
         if 'images' in image and cloud_provider in image['images']:
             cloud_images = image['images'][cloud_provider]
             
-            # Create one row per region
             for region, image_id in cloud_images.items():
                 base_row = self._create_image_row(image, image_type, cloud_provider)
                 base_row['Region'] = region
                 base_row['Image_ID'] = image_id
                 rows.append(base_row)
         else:
-            # If no cloud provider images, create one row with N/A values
             base_row = self._create_image_row(image, image_type, cloud_provider)
             rows.append(base_row)
         
@@ -407,36 +453,30 @@ class RuntimeImageCandidateFinder:
     
     def analyze(self, source_uuid: str, cloud_provider: str, csv_output: str = None, newer_limit: int = None, output_folder: str = None) -> bool:
         """Main analysis method"""
-        # Fetch catalog
         if not self.fetch_catalog():
             return False
         
-        # Find source image
         source_image = self.find_source_image(source_uuid)
         
         if not source_image:
             print(f"✗ Source image with UUID {source_uuid} not found in catalog")
             return False
         
-        # Get source timestamp and architecture
         source_timestamp = self.get_image_timestamp(source_image)
         source_architecture = source_image.get('architecture', 'unknown')
+        source_version = self.extract_version(source_image)
         
-        # Find newer images
-        newer_images = self.find_newer_images(source_image, cloud_provider, source_timestamp, source_architecture)
+        newer_images = self.find_newer_images(source_image, cloud_provider, source_timestamp, source_architecture, source_version)
         
-        # Store original count before limiting
         original_count = len(newer_images)
         
-        # Apply newer limit if specified
         if newer_limit and newer_limit > 0:
             newer_images = newer_images[:newer_limit]
         
-        print(f"✓ Found {len(newer_images)} runtime image candidates with {source_architecture} architecture")
+        version_info = f" (version {source_version})" if source_version else ""
+        print(f"✓ Found {len(newer_images)} runtime image candidates with {source_architecture} architecture{version_info}")
         
-        # Generate and display report (show only latest image by default, or when newer_limit > 1)
         if not newer_limit or newer_limit > 1:
-            # For display, show only the latest image
             display_images = newer_images[:1] if newer_images else []
             report = self.generate_report(source_image, display_images, cloud_provider)
             print("\n" + report)
@@ -445,11 +485,9 @@ class RuntimeImageCandidateFinder:
             else:
                 print(f"Note: Showing latest image only. CSV contains all {original_count} available candidate images.")
         else:
-            # Show all images in report (when newer_limit = 1)
             report = self.generate_report(source_image, newer_images, cloud_provider)
             print("\n" + report)
         
-        # Generate CSV report (always include all images)
         csv_file = self.generate_csv_report(source_image, newer_images, cloud_provider, csv_output, output_folder)
         print(f"✓ CSV report generated: {csv_file}")
         
@@ -458,7 +496,7 @@ class RuntimeImageCandidateFinder:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Find Cloudbreak runtime image candidates for custom image creation (filters by same architecture)",
+        description="Find Cloudbreak runtime image candidates for custom image creation (filters by same architecture and newer versions only)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

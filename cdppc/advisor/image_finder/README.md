@@ -1,11 +1,12 @@
 # Cloudbreak Runtime Image Candidate Finder
 
-This tool analyzes the Cloudbreak image catalog to find runtime image candidates based on a source image ID and cloud provider. It helps identify newer images that can be used as base images for creating custom runtime images or for external tools to copy and prepare custom images.
+This tool analyzes the Cloudbreak image catalog to find runtime image candidates based on a source image ID and cloud provider. It helps identify newer images that can be used as base images for creating custom runtime images or for external tools to copy and prepare custom images. The tool ensures version compatibility by showing only images with newer version numbers (e.g., 7.2.17 → 7.2.18, 7.3.1; 7.3.1 → 7.3.2, 7.4.0).
 
 ## Features
 
 - **Source Image Analysis**: Finds and analyzes the specified source image by UUID
 - **Cloud Provider Support**: Supports AWS, Azure, and GCP image analysis
+- **Version Compatibility**: Shows only newer versions (same or newer releases, newer patches)
 - **Date Comparison**: Compares images based on `created` and `published` timestamps
 - **Comprehensive Reporting**: Generates detailed reports showing runtime image candidates
 - **Region Information**: Displays available regions and image IDs for each cloud provider
@@ -74,6 +75,16 @@ python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8db
 - `--newer`: **Optional**. Limit the number of newer images to show (e.g., `--newer 3` for latest 3 images). When not provided or > 1, console report shows only the latest image, but CSV contains all available/limited images.
 - `--output-folder`: **Optional**. Output folder for CSV report (will append `_<timestamp>` to folder name)
 
+### Version Filtering Logic
+
+The tool implements intelligent version filtering to ensure compatibility:
+
+- **Newer patch versions**: Shows newer patches of the same version (e.g., 7.3.1-p400 → 7.3.1-p406)
+- **Newer minor versions**: Shows newer minor releases (e.g., 7.2.17 → 7.3.1)
+- **Newer major versions**: Shows newer major releases (e.g., 7.x → 8.x)
+- **Excludes older versions**: Never shows images with older version numbers
+- **Excludes same versions**: Never shows images with identical version and patch numbers
+
 ## Output
 
 The tool generates both a console report and a CSV file:
@@ -103,12 +114,14 @@ The CSV contains all candidate images based on the `--newer` parameter:
 - Created timestamp
 - Published timestamp
 - OS and OS type
+- Version information (prominently displayed)
 
 ### Runtime Image Candidates Analysis
 
 - UUID of each newer image
 - Creation and publication dates
 - OS information
+- Version information (prominently displayed)
 - Cloud provider specific details:
   - **AWS**: Region names and AMI IDs
   - **Azure**: Region names and VHD URLs
@@ -119,11 +132,13 @@ The CSV contains all candidate images based on the `--newer` parameter:
 
 1. **Catalog Fetching**: Downloads the latest image catalog from the Cloudbreak S3 bucket
 2. **Source Image Search**: Locates the specified source image by UUID in both base-images and versions sections
-3. **Architecture Detection**: Identifies the source image architecture (x86_64, arm64, etc.)
-4. **Timestamp Comparison**: Compares image timestamps using `created` field (with `published` as fallback)
-5. **Architecture Filtering**: Ensures candidate images have the same architecture as the source image
-6. **Cloud Provider Filtering**: Ensures candidate images support the specified cloud provider
-7. **Report Generation**: Creates a detailed report showing all runtime image candidates
+3. **Version Extraction**: Extracts version information from repository version strings (e.g., 7.3.1-1.cdh7.3.1.p400.67986116 → 7.3.1)
+4. **Architecture Detection**: Identifies the source image architecture (x86_64, arm64, etc.)
+5. **Timestamp Comparison**: Compares image timestamps using `created` field (with `published` as fallback)
+6. **Version Filtering**: Ensures candidate images have newer version numbers (patch, minor, or major)
+7. **Architecture Filtering**: Ensures candidate images have the same architecture as the source image
+8. **Cloud Provider Filtering**: Ensures candidate images support the specified cloud provider
+9. **Report Generation**: Creates a detailed report showing all runtime image candidates
 
 ## Example Output
 
@@ -139,6 +154,7 @@ SOURCE IMAGE:
   Published: 2023-02-28 12:30:47
   OS: centos7
   OS Type: redhat7
+  Version: 7.3.1
 
 RUNTIME IMAGE CANDIDATES FOR AWS (3 found):
 ------------------------------------------------------------
@@ -150,6 +166,7 @@ Image 1:
   Published: 2023-03-01 12:30:34
   OS: centos7
   OS Type: redhat7
+  Version: 7.3.2
   AWS Regions: 24 regions available
     us-east-1: ami-0b35cb48f30fef562
     us-west-2: ami-0ff7ec0f576bc07be
@@ -196,8 +213,10 @@ The tool automatically creates output folders and manages CSV file placement:
 ## Notes
 
 - The tool fetches the live catalog from the Cloudbreak S3 bucket, ensuring you always have the latest information
+- Version filtering ensures only newer releases are shown, preventing downgrade scenarios
 - Image timestamps are compared using Unix timestamps for accurate chronological ordering
 - The tool searches both the `base-images` and `versions` sections of the catalog for comprehensive coverage
+- Version information is extracted from repository version strings and displayed prominently
 - Architecture filtering ensures candidates are compatible with your source image
 - Cloud provider support is verified before including images in the candidate analysis
 - CSV export enables integration with external tools for custom image creation
