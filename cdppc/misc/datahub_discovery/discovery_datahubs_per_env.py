@@ -18,11 +18,12 @@ def log(message):
     print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
 
 def usage():
-    print("Usage: python discovery_datahubs_per_env.py --environment-name <environment-name> [--output-dir <path>] [--profile <cdp-profile>] [--debug]")
+    print("Usage: python discovery_datahubs_per_env.py --environment-name <environment-name> [--datahub-name <datahub-name>] [--output-dir <path>] [--profile <cdp-profile>] [--debug]")
     print("       python discovery_datahubs_per_env.py --help")
     print("       python discovery_datahubs_per_env.py -h")
     print("\nArguments:")
     print("  --environment-name <environment-name>  Name of the CDP environment to discover DataHub clusters in. (required)")
+    print("  --datahub-name <datahub-name>          Name of a specific DataHub cluster to discover (optional)")
     print("  --output-dir <path>        Directory to save output files (default: /tmp/discovery_datahubs-<timestamp>)")
     print("  --profile <cdp-profile>    CDP CLI profile to use (default: 'default')")
     print("  --debug                    Enable debug output")
@@ -474,6 +475,7 @@ def get_cod_database_name_for_cluster(cluster_internal_name, environment_name, p
 
 def main():
     environment_name = None
+    datahub_name = None
     output_arg = None
     profile = "default"
     debug = False
@@ -503,6 +505,12 @@ def main():
         elif arg == "--environment-name":
             if i + 1 < len(args):
                 environment_name = args[i + 1]
+                i += 2
+            else:
+                usage()
+        elif arg == "--datahub-name":
+            if i + 1 < len(args):
+                datahub_name = args[i + 1]
                 i += 2
             else:
                 usage()
@@ -538,7 +546,10 @@ def main():
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    log(f"🔍 Starting DataHub discovery for environment: {environment_name} (profile: {profile})")
+    if datahub_name:
+        log(f"🔍 Starting DataHub discovery for specific cluster: {datahub_name} in environment: {environment_name} (profile: {profile})")
+    else:
+        log(f"🔍 Starting DataHub discovery for all clusters in environment: {environment_name} (profile: {profile})")
 
     # --- ENVIRONMENT SECTION ---
     environment_dir = base_dir / "environment"
@@ -714,27 +725,55 @@ def main():
     if all_datalake_instance_rows:
         save_instance_groups_to_csv(base_dir / f"ALL_{environment_name}_datalake_instance_groups.csv", all_datalake_instance_rows)
 
-    # List all DataHub clusters in the environment
-    list_output, list_err = run_command_json(
-        f"cdp datahub list-clusters --profile {profile} --environment-name {environment_name}",
-        task_name="Listing DataHub clusters",
-        debug=debug
-    )
-    clusters = list_output.get("clusters", []) if list_output else []
+    # List DataHub clusters in the environment
+    if datahub_name:
+        # For specific DataHub, we still need to list clusters to get the CRN
+        list_output, list_err = run_command_json(
+            f"cdp datahub list-clusters --profile {profile} --environment-name {environment_name}",
+            task_name="Listing DataHub clusters to find specific cluster",
+            debug=debug
+        )
+        all_clusters = list_output.get("clusters", []) if list_output else []
+        
+        # Filter to only the specific cluster
+        clusters = [c for c in all_clusters if c.get('clusterName') == datahub_name]
+        
+        if not clusters:
+            log(f"No DataHub cluster found with name '{datahub_name}' in environment '{environment_name}'.")
+            if all_clusters:
+                log("Available clusters in this environment:")
+                for c in all_clusters:
+                    log(f"  - {c.get('clusterName')}")
+            else:
+                log("No DataHub clusters found in this environment.")
+                if debug:
+                    log(f"DEBUG: list_output: {list_output}")
+                    log(f"DEBUG: list_err: {list_err}")
+            sys.exit(0)
+        
+        log(f"🧩 Found specific cluster: {datahub_name}")
+    else:
+        # List all DataHub clusters in the environment
+        list_output, list_err = run_command_json(
+            f"cdp datahub list-clusters --profile {profile} --environment-name {environment_name}",
+            task_name="Listing DataHub clusters",
+            debug=debug
+        )
+        clusters = list_output.get("clusters", []) if list_output else []
 
-    if not clusters:
-        log("No DataHub clusters found.")
-        if debug:
-            log(f"DEBUG: list_output: {list_output}")
-            log(f"DEBUG: list_err: {list_err}")
-            log(f"DEBUG: Profile used: {profile}")
-            log(f"DEBUG: Available profiles: {profiles}")
-            log(f"DEBUG: Environment name: {environment_name}")
-        sys.exit(0)
+        if not clusters:
+            log("No DataHub clusters found.")
+            if debug:
+                log(f"DEBUG: list_output: {list_output}")
+                log(f"DEBUG: list_err: {list_err}")
+                log(f"DEBUG: Profile used: {profile}")
+                log(f"DEBUG: Available profiles: {profiles}")
+                log(f"DEBUG: Environment name: {environment_name}")
+            sys.exit(0)
 
-    log(f"🧩 Found {len(clusters)} cluster(s):")
-    for c in clusters:
-        log(f"  - {c.get('clusterName')}")
+        log(f"🧩 Found {len(clusters)} cluster(s):")
+        for c in clusters:
+            log(f"  - {c.get('clusterName')}")
 
     # Pre-fetch all COD databases for the environment for efficient lookup
     cod_db_lookup = {}
@@ -885,7 +924,10 @@ def main():
             log(f"ℹ️ No recipes found in cluster: {name}")
 
     if all_instance_rows:
-        save_instance_groups_to_csv(base_dir / f"ALL_{environment_name}_datahub_instance_groups.csv", all_instance_rows)
+        if datahub_name:
+            save_instance_groups_to_csv(base_dir / f"{environment_name}_{datahub_name}_datahub_instance_groups.csv", all_instance_rows)
+        else:
+            save_instance_groups_to_csv(base_dir / f"ALL_{environment_name}_datahub_instance_groups.csv", all_instance_rows)
 
     archive_path = f"{base_dir}.tar.gz"
     shutil.make_archive(str(base_dir), 'gztar', root_dir=base_dir)

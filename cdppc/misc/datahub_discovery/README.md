@@ -1,6 +1,6 @@
 # CDP Environment Discovery: DataHub, Datalake, and FreeIPA
 
-This Python tool automates discovery, inspection, and export of resources within a CDP environment. It queries the CDP CLI for DataHub clusters, Datalakes, and FreeIPA details, gathers metadata, and exports JSON/CSV summaries. A timestamped output folder is created and compressed into a `.tar.gz` at the end.
+This Python tool automates discovery, inspection, and export of resources within a CDP environment. It queries the CDP CLI for DataHub clusters, Datalakes, and FreeIPA details, gathers metadata, and exports JSON/CSV summaries. You can discover all DataHub clusters in an environment or target a specific cluster using the `--datahub-name` parameter. A timestamped output folder is created and compressed into a `.tar.gz` at the end.
 
 ---
 
@@ -9,7 +9,7 @@ This Python tool automates discovery, inspection, and export of resources within
 - Discovers resources in a CDP environment:
   - **Environment**: describe and flatten to CSV; FreeIPA upgrade options; FreeIPA instance groups to CSV
   - **Datalake**: list/describe, DB server, available/runtime images, instance groups to CSV, recipes discovery+export
-  - **DataHub**: list/describe, instance groups to CSV, upgrade images, DB server, recipes discovery+export
+  - **DataHub**: list/describe all clusters or a specific cluster, instance groups to CSV, upgrade images, DB server, recipes discovery+export
 - Extracts instance group + volume metadata into:
   - Per-entity CSV (per DataHub cluster / per Datalake)
   - Aggregated CSVs across all DataHubs and across all Datalakes
@@ -42,20 +42,27 @@ Ensure the **CDP CLI is installed and configured**. The script uses (among other
 ```bash
 python discovery_datahubs_per_env.py \
   --environment-name <env_name> \
+  [--datahub-name <datahub_name>] \
   [--output-dir <path_prefix>] \
   [--profile <cdp_profile>] \
   [--debug]
 ```
 
-Example:
+Examples:
 
 ```bash
-# Minimal
+# Discover all DataHub clusters in an environment (original functionality)
 python discovery_datahubs_per_env.py --environment-name ENV_PROD_USW1
+
+# Discover a specific DataHub cluster
+python discovery_datahubs_per_env.py \
+  --environment-name ENV_PROD_USW1 \
+  --datahub-name my-cluster
 
 # Custom output folder prefix + profile + debug
 python discovery_datahubs_per_env.py \
   --environment-name ENV_PROD_USW1 \
+  --datahub-name my-cluster \
   --output-dir ./datahubs_output_ENV_PROD_USW1 \
   --profile prod \
   --debug
@@ -130,7 +137,8 @@ discovery_datahubs-<timestamp>/
 │   └── recipes/
 │       ├── recipe_<name>.json
 │       └── recipe_<name>.sh
-├── ALL_<env>_datahub_instance_groups.csv
+├── ALL_<env>_datahub_instance_groups.csv          # when discovering all clusters
+├── <env>_<cluster>_datahub_instance_groups.csv    # when discovering specific cluster
 ├── ALL_<env>_datalake_instance_groups.csv
 └── discovery_datahubs-<timestamp>.tar.gz
 ```
@@ -152,6 +160,8 @@ Columns vary by resource type; inspect headers in generated CSVs for full detail
 - The script pretty-prints and parses the `clusterTemplateContent` embedded JSON field when present.
 - Recipes are described and saved as both JSON and shell script content (if available).
 - A final `.tar.gz` archive of the output directory is created for easy sharing.
+- When using `--datahub-name`, the script validates that the specified cluster exists and provides helpful error messages if not found.
+- CSV output files are named differently when targeting a specific cluster vs. all clusters for easy identification.
 - Suitable for audits, upgrade planning, and environment diagnostics.
 
 ---
