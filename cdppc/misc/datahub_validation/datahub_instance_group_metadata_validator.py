@@ -41,7 +41,7 @@ def debug_print(debug, msg):
 def run_cdp_cli(cmd, profile, debug):
     """
     Run a CDP CLI command and return the parsed JSON output.
-CHR
+
     Args:
         cmd (list): List of command arguments for CDP CLI.
         profile (str): CDP CLI profile to use.
@@ -134,12 +134,13 @@ def get_cluster_details(cluster_id, profile, debug):
         logging.error(f"Failed to get cluster details: {e}")
         raise RuntimeError(f"Failed to get cluster details: {e}")
 
-def get_aws_instance_volume_details(instance_id, debug):
+def get_aws_instance_volume_details(instance_id, region, debug):
     """
     Retrieve detailed volume information for an AWS EC2 instance.
 
     Args:
         instance_id (str): The EC2 instance ID.
+        region (str): The AWS region where the instance exists.
         debug (bool): Whether to print debug output.
 
     Returns:
@@ -150,6 +151,7 @@ def get_aws_instance_volume_details(instance_id, debug):
         instance_cmd = [
             "aws", "ec2", "describe-instances",
             "--instance-ids", instance_id,
+            "--region", region,
             "--query", "Reservations[].Instances[].[RootDeviceName, BlockDeviceMappings[].{DeviceName:DeviceName, VolumeId:Ebs.VolumeId, DeleteOnTermination:Ebs.DeleteOnTermination, AttachTime:Ebs.AttachTime, Status:Ebs.Status}]",
             "--output", "json"
         ]
@@ -172,6 +174,7 @@ def get_aws_instance_volume_details(instance_id, debug):
             "aws", "ec2", "describe-volumes",
             "--volume-ids"
         ] + volume_ids + [
+            "--region", region,
             "--output", "json"
         ]
         debug_print(debug, f"Running AWS CLI: {' '.join(volumes_cmd)}")
@@ -208,7 +211,7 @@ def get_aws_instance_volume_details(instance_id, debug):
         logging.error(f"Failed to get AWS volume details for {instance_id}: {e}")
         return []
 
-def get_instance_volume_details(instance, cloud_platform, profile, debug):
+def get_instance_volume_details(instance, cloud_platform, profile, debug, region=None):
     """
     Retrieve detailed volume information for an instance, depending on cloud platform.
 
@@ -217,6 +220,7 @@ def get_instance_volume_details(instance, cloud_platform, profile, debug):
         cloud_platform (str): Cloud platform name (e.g., "aws").
         profile (str): CDP CLI profile to use.
         debug (bool): Whether to print debug output.
+        region (str): AWS region for the instance (required for AWS).
 
     Returns:
         list: List of dictionaries with volume details.
@@ -227,7 +231,10 @@ def get_instance_volume_details(instance, cloud_platform, profile, debug):
         logging.warning(f"Instance missing 'id': {instance}")
         return []
     if cloud_platform.lower() == "aws":
-        return get_aws_instance_volume_details(instance_id, debug)
+        if not region:
+            logging.warning(f"No region provided for AWS instance {instance_id}, skipping volume details")
+            return []
+        return get_aws_instance_volume_details(instance_id, region, debug)
     else:
         debug_print(debug, f"Unknown cloud platform {cloud_platform}, using attachedVolumes from cluster response")
         logging.warning(f"Unknown cloud platform {cloud_platform}, using attachedVolumes from cluster response")
@@ -247,6 +254,279 @@ def get_instance_volume_details(instance, cloud_platform, profile, debug):
                 "is_root_disk": ""
             })
         return result
+
+def get_region_from_cluster(cluster):
+    """
+    Extract the AWS region from cluster details.
+
+    Args:
+        cluster (dict): Cluster dictionary.
+
+    Returns:
+        str: AWS region or None if not found.
+    """
+    # Try to get region from different possible locations in the cluster data
+    region = None
+    
+    # Check cloud provider configuration
+    for config_key in ["awsConfiguration", "azureConfiguration", "gcpConfiguration"]:
+        config = cluster.get(config_key, {})
+        if isinstance(config, dict):
+            # For AWS, check for region
+            if config_key == "awsConfiguration":
+                region = config.get("region")
+                if region:
+                    return region
+    
+    # Check instance groups for region information
+    instance_groups = cluster.get("instanceGroups", [])
+    for group in instance_groups:
+        instances = group.get("instances", [])
+        for instance in instances:
+            # Check if instance has availability zone info
+            az = instance.get("availabilityZone")
+            if az and "-" in az:
+                # Extract region from availability zone (e.g., us-east-1a -> us-east-1)
+                region = az[:-1]  # Remove the last character (zone letter)
+                return region
+    
+    # Check for region in other common locations
+    region = cluster.get("region") or cluster.get("awsRegion") or cluster.get("cloudRegion")
+    
+    return region
+
+def get_environment_details(environment_name, profile, debug):
+    """
+    Retrieve detailed information for a CDP environment.
+
+    Args:
+        environment_name (str): Environment name.
+        profile (str): CDP CLI profile to use.
+        debug (bool): Whether to print debug output.
+
+    Returns:
+        dict: Environment details including FreeIPA information.
+
+    Raises:
+        RuntimeError: If environment details cannot be retrieved.
+    """
+    try:
+        logging.info(f"Retrieving environment details for '{environment_name}'...")
+        resp = run_cdp_cli(["environments", "describe-environment", "--environment-name", environment_name], profile, debug)
+        environment = resp.get("environment")
+        if not environment:
+            raise RuntimeError("No environment details found in response.")
+        logging.info(f"Environment details retrieved for '{environment_name}'.")
+        return environment
+    except Exception as e:
+        logging.error(f"Failed to get environment details: {e}")
+        raise RuntimeError(f"Failed to get environment details: {e}")
+
+def get_freeipa_details(environment_name, profile, debug):
+    """
+    Retrieve FreeIPA instance information from environment details.
+
+    Args:
+        environment_name (str): Environment name.
+        profile (str): CDP CLI profile to use.
+        debug (bool): Whether to print debug output.
+
+    Returns:
+        dict: FreeIPA details including instances.
+    """
+    try:
+        environment = get_environment_details(environment_name, profile, debug)
+        freeipa_details = environment.get("freeipa") or environment.get("freeIpaDetails") or environment.get("freeIpa")
+        if not freeipa_details:
+            logging.warning(f"No FreeIPA details found for environment {environment_name}")
+            return {}
+        
+        instances = freeipa_details.get("instances", [])
+        debug_print(debug, f"Found {len(instances)} FreeIPA instances in environment {environment_name}")
+        return freeipa_details
+    except Exception as e:
+        logging.error(f"Failed to get FreeIPA details for environment {environment_name}: {e}")
+        return {}
+
+def list_datalakes_for_env(environment_name, profile, debug):
+    """
+    List all datalakes in a given environment.
+
+    Args:
+        environment_name (str): Name of the CDP environment.
+        profile (str): CDP CLI profile to use.
+        debug (bool): Whether to print debug output.
+
+    Returns:
+        list: List of datalake dictionaries.
+    """
+    try:
+        resp = run_cdp_cli(
+            ["datalake", "list-datalakes", "--environment-name", environment_name],
+            profile, debug
+        )
+        datalakes = resp.get("datalakes", [])
+        debug_print(debug, f"Found {len(datalakes)} datalakes in environment {environment_name}")
+        return datalakes
+    except Exception as e:
+        logging.error(f"Failed to list datalakes for environment {environment_name}: {e}")
+        return []
+
+def get_datalake_details(datalake_crn, profile, debug):
+    """
+    Retrieve detailed information for a datalake.
+
+    Args:
+        datalake_crn (str): Datalake CRN.
+        profile (str): CDP CLI profile to use.
+        debug (bool): Whether to print debug output.
+
+    Returns:
+        dict: Datalake details.
+
+    Raises:
+        RuntimeError: If datalake details cannot be retrieved.
+    """
+    try:
+        logging.info(f"Retrieving datalake details for '{datalake_crn}'...")
+        resp = run_cdp_cli(["datalake", "describe-datalake", "--datalake-name", datalake_crn], profile, debug)
+        datalake = resp.get("datalake") or resp.get("datalakeDetails")
+        if not datalake:
+            raise RuntimeError("No datalake details found in response.")
+        logging.info(f"Datalake details retrieved for '{datalake_crn}'.")
+        return datalake
+    except Exception as e:
+        logging.error(f"Failed to get datalake details: {e}")
+        raise RuntimeError(f"Failed to get datalake details: {e}")
+
+def flatten_freeipa_instance_groups(environment_name, freeipa_obj, debug):
+    """
+    Flatten the FreeIPA instance groups for processing.
+
+    Args:
+        environment_name (str): Environment name.
+        freeipa_obj (dict): FreeIPA object containing instances.
+        debug (bool): Whether to print debug output.
+
+    Returns:
+        dict: Mapping of hostgroup to list of instance dicts.
+    """
+    output_data = {}
+    if not freeipa_obj:
+        return output_data
+
+    # FreeIPA does not have explicit instanceGroups, but we can treat all instances as a single group or by instanceGroup field.
+    instances = freeipa_obj.get("instances", [])
+    debug_print(debug, f"Processing {len(instances)} FreeIPA instances")
+    
+    for inst in instances:
+        ig_name = inst.get("instanceGroup") or "freeipa-default"
+        if ig_name not in output_data:
+            output_data[ig_name] = []
+        
+        # Map FreeIPA instance fields to match the expected structure
+        mapped_instance = {
+            "id": inst.get("instanceId"),
+            "state": inst.get("instanceStatus"),
+            "privateIp": inst.get("privateIP"),
+            "publicIp": inst.get("publicIP"),
+            "instanceType": inst.get("instanceType"),
+            "attachedVolumes": inst.get("attachedVolumes", []),
+            # Additional FreeIPA-specific fields
+            "discoveryFQDN": inst.get("discoveryFQDN"),
+            "sshPort": inst.get("sshPort"),
+            "availabilityZone": inst.get("availabilityZone"),
+            "instanceVmType": inst.get("instanceVmType"),
+            "lifeCycle": inst.get("lifeCycle")
+        }
+        output_data[ig_name].append(mapped_instance)
+    
+    return output_data
+
+def flatten_datalake_instance_groups(datalake_name, environment_name, datalake_obj, debug):
+    """
+    Flatten the instanceGroups for a datalake.
+
+    Args:
+        datalake_name (str): Datalake name.
+        environment_name (str): Environment name.
+        datalake_obj (dict): Datalake object containing instance groups.
+        debug (bool): Whether to print debug output.
+
+    Returns:
+        dict: Mapping of hostgroup to list of instance dicts.
+    """
+    output_data = {}
+    
+    # Top-level instanceGroups (for newer API responses)
+    instance_groups = datalake_obj.get("instanceGroups", [])
+    if instance_groups:
+        debug_print(debug, f"Processing {len(instance_groups)} datalake instance groups from top level")
+        for ig in instance_groups:
+            ig_name = ig.get("name", "unknown-hostgroup")
+            instances = ig.get("instances", [])
+            output_data[ig_name] = []
+            
+            for inst in instances:
+                # Map datalake instance fields to match the expected structure
+                mapped_instance = {
+                    "id": inst.get("id"),
+                    "state": inst.get("state"),
+                    "privateIp": inst.get("privateIp"),
+                    "publicIp": inst.get("publicIp"),
+                    "instanceType": inst.get("instanceTypeVal"),
+                    "attachedVolumes": inst.get("attachedVolumes", []),
+                    # Additional datalake-specific fields
+                    "discoveryFQDN": inst.get("discoveryFQDN"),
+                    "instanceStatus": inst.get("instanceStatus"),
+                    "statusReason": inst.get("statusReason"),
+                    "sshPort": inst.get("sshPort"),
+                    "clouderaManagerServer": inst.get("clouderaManagerServer"),
+                    "availabilityZone": inst.get("availabilityZone"),
+                    "instanceVmType": inst.get("instanceVmType"),
+                    "rackId": inst.get("rackId"),
+                    "subnetId": inst.get("subnetId")
+                }
+                output_data[ig_name].append(mapped_instance)
+    else:
+        # Try to find instanceGroups under cloud provider configuration
+        for config_key in ["awsConfiguration", "azureConfiguration", "gcpConfiguration"]:
+            config = datalake_obj.get(config_key, {})
+            if isinstance(config, dict):
+                instance_groups = config.get("instanceGroups", [])
+                if instance_groups:
+                    debug_print(debug, f"Processing {len(instance_groups)} datalake instance groups from {config_key}")
+                    for ig in instance_groups:
+                        ig_name = ig.get("name", "unknown-hostgroup")
+                        instances = ig.get("instances", [])
+                        output_data[ig_name] = []
+                        
+                        for inst in instances:
+                            # Map datalake instance fields to match the expected structure
+                            mapped_instance = {
+                                "id": inst.get("id"),
+                                "state": inst.get("state"),
+                                "privateIp": inst.get("privateIp"),
+                                "publicIp": inst.get("publicIp"),
+                                "instanceType": inst.get("instanceTypeVal"),
+                                "attachedVolumes": inst.get("attachedVolumes", []),
+                                # Additional datalake-specific fields
+                                "discoveryFQDN": inst.get("discoveryFQDN"),
+                                "instanceStatus": inst.get("instanceStatus"),
+                                "statusReason": inst.get("statusReason"),
+                                "sshPort": inst.get("sshPort"),
+                                "clouderaManagerServer": inst.get("clouderaManagerServer"),
+                                "availabilityZone": inst.get("availabilityZone"),
+                                "instanceVmType": inst.get("instanceVmType"),
+                                "rackId": inst.get("rackId"),
+                                "subnetId": inst.get("subnetId")
+                            }
+                            output_data[ig_name].append(mapped_instance)
+                    break  # Only process the first valid configuration
+    
+    total_instances = sum(len(instances) for instances in output_data.values())
+    debug_print(debug, f"Total datalake instances processed: {total_instances}")
+    return output_data
 
 def write_detailed_csv(data, output_folder, cluster_name, debug):
     """
@@ -269,6 +549,8 @@ def write_detailed_csv(data, output_folder, cluster_name, debug):
             "hostgroup",
             "instance_id",
             "instance_state",
+            "instance_type",
+            "instance_vm_type",
             "private_ip",
             "public_ip",
             "volume_id",
@@ -286,6 +568,8 @@ def write_detailed_csv(data, output_folder, cluster_name, debug):
             for inst in instances:
                 instance_id = inst.get("id")
                 instance_state = inst.get("state")
+                instance_type = inst.get("instanceType")
+                instance_vm_type = inst.get("instanceVmType")
                 private_ip = inst.get("privateIp")
                 public_ip = inst.get("publicIp")
                 for vol in inst.get("detailed_volumes", []):
@@ -293,6 +577,8 @@ def write_detailed_csv(data, output_folder, cluster_name, debug):
                         hostgroup,
                         instance_id,
                         instance_state,
+                        instance_type,
+                        instance_vm_type,
                         private_ip,
                         public_ip,
                         vol.get("volume_id"),
@@ -346,13 +632,14 @@ def write_instancegroup_json_and_csv(cluster, output_folder, debug):
                 "private_ip": inst.get("privateIp"),
                 "public_ip": inst.get("publicIp"),
                 "instance_type": inst.get("instanceType"),
+                "instance_vm_type": inst.get("instanceVmType"),
                 "attached_volumes": attached_vols  # keep as list for now
             })
 
     # Prepare CSV fieldnames: flatten attached_volumes fields
     base_fields = [
         "hostgroup", "instance_group_type", "group_state",
-        "instance_id", "instance_state", "private_ip", "public_ip", "instance_type"
+        "instance_id", "instance_state", "private_ip", "public_ip", "instance_type", "instance_vm_type"
     ]
     # Sort for stable order
     attached_volumes_fields = sorted(attached_volumes_fields)
@@ -408,13 +695,13 @@ def main():
     Main entry point for the DataHub instance group and volume validation script.
 
     Parses command-line arguments, validates the CDP profile, determines clusters to process,
-    retrieves cluster and instance details, and writes output files.
+    retrieves cluster, FreeIPA, and datalake instance details, and writes output files.
     """
     parser = argparse.ArgumentParser(
-        description="Validate DataHub instance groups and volumes. Provide --environment-name to process all clusters in an environment, or --cluster-name for specific clusters."
+        description="Validate DataHub instance groups and volumes, including FreeIPA and datalake instances. Provide --environment-name to process all clusters, FreeIPA, and datalakes in an environment, or --cluster-name for specific DataHub clusters only."
     )
     parser.add_argument("--profile", required=False, default="default", help="CDP CLI profile to use (default: 'default')")
-    parser.add_argument("--environment-name", help="CDP environment name to process all DataHub clusters in the environment")
+    parser.add_argument("--environment-name", help="CDP environment name to process all DataHub clusters, FreeIPA instances, and datalakes in the environment")
     parser.add_argument("--cluster-name", action="append", help="DataHub cluster name to process (can be specified multiple times)")
     parser.add_argument("--output-folder", default="/tmp/datahub_validations", help="Output folder (default: /tmp/datahub_validations)")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
@@ -477,11 +764,13 @@ def main():
 
         cluster_name = cluster.get("clusterName") or cluster.get("name") or "unknown_cluster"
         cloud_platform = cluster.get("cloudPlatform", "unknown")
+        region = get_region_from_cluster(cluster)
         instance_groups = cluster.get("instanceGroups", [])
         output_data = {}
 
         total_instances = sum(len(group.get("instances", [])) for group in instance_groups)
-        logging.info(f"Cluster: {cluster_name} | Cloud: {cloud_platform} | Instance groups: {len(instance_groups)} | Instances: {total_instances}")
+        region_info = f" | Region: {region}" if region else " | Region: Not found"
+        logging.info(f"Cluster: {cluster_name} | Cloud: {cloud_platform}{region_info} | Instance groups: {len(instance_groups)} | Instances: {total_instances}")
 
         # Create a subfolder for each cluster
         safe_cluster_name = cluster_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -505,7 +794,7 @@ def main():
                 output_data[hostgroup] = []
                 for instance in instances:
                     logging.info(f"Processing instance {instance.get('id')} in hostgroup {hostgroup}")
-                    detailed_volumes = get_instance_volume_details(instance, cloud_platform, profile, args.debug)
+                    detailed_volumes = get_instance_volume_details(instance, cloud_platform, profile, args.debug, region)
                     instance_copy = dict(instance)
                     instance_copy["detailed_volumes"] = detailed_volumes
                     output_data[hostgroup].append(instance_copy)
@@ -524,6 +813,172 @@ def main():
         write_detailed_csv(output_data, cluster_output_folder, cluster_name, args.debug)
         logging.info(f"Cluster {cluster_name} export complete. Output written to {os.path.abspath(cluster_output_folder)}/")
         print(f"Cluster {cluster_name} export complete. Output written to {os.path.abspath(cluster_output_folder)}/")
+
+    # Process FreeIPA instances if environment name is provided
+    if args.environment_name:
+        try:
+            logging.info(f"Processing FreeIPA instances for environment {args.environment_name}")
+            freeipa_details = get_freeipa_details(args.environment_name, profile, args.debug)
+            
+            # Get environment details to extract region for FreeIPA instances
+            environment_details = get_environment_details(args.environment_name, profile, args.debug)
+            freeipa_region = get_region_from_cluster(environment_details)
+            region_info = f" | Region: {freeipa_region}" if freeipa_region else " | Region: Not found"
+            logging.info(f"FreeIPA processing{region_info}")
+            
+            if freeipa_details:
+                # Create FreeIPA output folder
+                freeipa_output_folder = os.path.join(base_output_folder, "freeipa")
+                os.makedirs(freeipa_output_folder, exist_ok=True)
+                
+                # Write FreeIPA details JSON
+                freeipa_json_path = os.path.join(freeipa_output_folder, "freeipa_details.json")
+                with open(freeipa_json_path, "w", encoding="utf-8") as jf:
+                    json.dump(freeipa_details, jf, indent=2)
+                logging.info(f"FreeIPA details JSON written: {freeipa_json_path}")
+                
+                # Flatten FreeIPA instance groups
+                freeipa_output_data = flatten_freeipa_instance_groups(args.environment_name, freeipa_details, args.debug)
+                
+                if freeipa_output_data:
+                    total_freeipa_instances = sum(len(instances) for instances in freeipa_output_data.values())
+                    logging.info(f"FreeIPA: {len(freeipa_output_data)} instance groups | Instances: {total_freeipa_instances}")
+                    
+                    # Write FreeIPA instance groups CSV
+                    write_instancegroup_json_and_csv({"instanceGroups": [
+                        {"name": hostgroup, "instances": instances} 
+                        for hostgroup, instances in freeipa_output_data.items()
+                    ]}, freeipa_output_folder, args.debug)
+                    
+                    # Prepare detailed volume info for each FreeIPA instance
+                    use_progress = tqdm is not None and total_freeipa_instances > 1
+                    pbar = tqdm(total=total_freeipa_instances, desc=f"FreeIPA: Processing instances", unit="instance") if use_progress else None
+                    
+                    try:
+                        for hostgroup, instances in freeipa_output_data.items():
+                            for instance in instances:
+                                logging.info(f"Processing FreeIPA instance {instance.get('id')} in hostgroup {hostgroup}")
+                                detailed_volumes = get_instance_volume_details(instance, "aws", profile, args.debug, freeipa_region)
+                                instance_copy = dict(instance)
+                                instance_copy["detailed_volumes"] = detailed_volumes
+                                instance["detailed_volumes"] = detailed_volumes
+                                if pbar:
+                                    pbar.update(1)
+                        if pbar:
+                            pbar.close()
+                    except Exception as e:
+                        if pbar:
+                            pbar.close()
+                        logging.error(f"Error during FreeIPA instance processing: {e}")
+                        print(f"Error during FreeIPA instance processing: {e}")
+                    
+                    # Write detailed FreeIPA CSV
+                    write_detailed_csv(freeipa_output_data, freeipa_output_folder, "freeipa", args.debug)
+                    logging.info(f"FreeIPA export complete. Output written to {os.path.abspath(freeipa_output_folder)}/")
+                    print(f"FreeIPA export complete. Output written to {os.path.abspath(freeipa_output_folder)}/")
+                else:
+                    logging.info("No FreeIPA instances found to process")
+            else:
+                logging.info("No FreeIPA details found for environment")
+                
+        except Exception as e:
+            logging.error(f"Error processing FreeIPA for environment {args.environment_name}: {e}")
+            print(f"Error processing FreeIPA for environment {args.environment_name}: {e}")
+
+        # Process Datalake instances if environment name is provided
+        try:
+            logging.info(f"Processing datalake instances for environment {args.environment_name}")
+            datalakes = list_datalakes_for_env(args.environment_name, profile, args.debug)
+            
+            if datalakes:
+                logging.info(f"Found {len(datalakes)} datalake(s) in environment {args.environment_name}")
+                
+                for datalake in datalakes:
+                    datalake_crn = datalake.get("crn")
+                    datalake_name = datalake.get("datalakeName")
+                    
+                    if not datalake_crn or not datalake_name:
+                        continue
+                    
+                    try:
+                        # Get datalake details
+                        datalake_details = get_datalake_details(datalake_crn, profile, args.debug)
+                        
+                        # Get region from datalake details
+                        datalake_region = get_region_from_cluster(datalake_details)
+                        region_info = f" | Region: {datalake_region}" if datalake_region else " | Region: Not found"
+                        logging.info(f"Datalake {datalake_name} processing{region_info}")
+                        
+                        # Create datalake output folder
+                        safe_datalake_name = datalake_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+                        datalake_output_folder = os.path.join(base_output_folder, safe_datalake_name)
+                        os.makedirs(datalake_output_folder, exist_ok=True)
+                        
+                        # Write datalake details JSON
+                        datalake_json_path = os.path.join(datalake_output_folder, "datalake_details.json")
+                        with open(datalake_json_path, "w", encoding="utf-8") as jf:
+                            json.dump(datalake_details, jf, indent=2)
+                        logging.info(f"Datalake details JSON written: {datalake_json_path}")
+                        
+                        # Flatten datalake instance groups
+                        datalake_output_data = flatten_datalake_instance_groups(datalake_name, args.environment_name, datalake_details, args.debug)
+                        
+                        if datalake_output_data:
+                            total_datalake_instances = sum(len(instances) for instances in datalake_output_data.values())
+                            logging.info(f"Datalake {datalake_name}: {len(datalake_output_data)} instance groups | Instances: {total_datalake_instances}")
+                            
+                            # Write datalake instance groups CSV
+                            write_instancegroup_json_and_csv({"instanceGroups": [
+                                {"name": hostgroup, "instances": instances} 
+                                for hostgroup, instances in datalake_output_data.items()
+                            ]}, datalake_output_folder, args.debug)
+                            
+                            # Prepare detailed volume info for each datalake instance
+                            use_progress = tqdm is not None and total_datalake_instances > 1
+                            pbar = tqdm(total=total_datalake_instances, desc=f"{datalake_name}: Processing instances", unit="instance") if use_progress else None
+                            
+                            try:
+                                for hostgroup, instances in datalake_output_data.items():
+                                    for instance in instances:
+                                        logging.info(f"Processing datalake instance {instance.get('id')} in hostgroup {hostgroup}")
+                                        # Determine cloud platform from datalake details
+                                        cloud_platform = "aws"  # Default to AWS
+                                        for config_key in ["awsConfiguration", "azureConfiguration", "gcpConfiguration"]:
+                                            if config_key in datalake_details:
+                                                cloud_platform = config_key.replace("Configuration", "").lower()
+                                                break
+                                        
+                                        detailed_volumes = get_instance_volume_details(instance, cloud_platform, profile, args.debug, datalake_region)
+                                        instance_copy = dict(instance)
+                                        instance_copy["detailed_volumes"] = detailed_volumes
+                                        instance["detailed_volumes"] = detailed_volumes
+                                        if pbar:
+                                            pbar.update(1)
+                                if pbar:
+                                    pbar.close()
+                            except Exception as e:
+                                if pbar:
+                                    pbar.close()
+                                logging.error(f"Error during datalake instance processing for {datalake_name}: {e}")
+                                print(f"Error during datalake instance processing for {datalake_name}: {e}")
+                            
+                            # Write detailed datalake CSV
+                            write_detailed_csv(datalake_output_data, datalake_output_folder, datalake_name, args.debug)
+                            logging.info(f"Datalake {datalake_name} export complete. Output written to {os.path.abspath(datalake_output_folder)}/")
+                            print(f"Datalake {datalake_name} export complete. Output written to {os.path.abspath(datalake_output_folder)}/")
+                        else:
+                            logging.info(f"No datalake instances found for {datalake_name}")
+                            
+                    except Exception as e:
+                        logging.error(f"Error processing datalake {datalake_name}: {e}")
+                        print(f"Error processing datalake {datalake_name}: {e}")
+                        continue
+            else:
+                logging.info("No datalakes found in environment")
+                
+        except Exception as e:
+            logging.error(f"Error processing datalakes for environment {args.environment_name}: {e}")
+            print(f"Error processing datalakes for environment {args.environment_name}: {e}")
 
 if __name__ == "__main__":
     main()
