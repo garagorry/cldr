@@ -1,16 +1,16 @@
 # Cloudbreak Runtime Image Candidate Finder
 
-This tool analyzes the Cloudbreak image catalog to find runtime image candidates based on a source image ID and cloud provider. It helps identify newer images that can be used as base images for creating custom runtime images or for external tools to copy and prepare custom images. The tool ensures version compatibility by showing only images with newer version numbers (e.g., 7.2.17 → 7.2.18, 7.3.1; 7.3.1 → 7.3.2, 7.4.0).
+This tool analyzes the Cloudbreak image catalog to find runtime image candidates based on a source image ID and cloud provider. It helps identify newer images that can be used as base images for creating custom runtime images or for external tools to copy and prepare custom images. The tool enforces strict version compatibility using base version and patch level logic (e.g., 7.2.17 → 7.2.18, 7.3.1; 7.3.1 → 7.3.2, 7.4.0) and never suggests a downgrade.
 
 ## Features
 
 - **Source Image Analysis**: Finds and analyzes the specified source image by UUID
 - **Cloud Provider Support**: Supports AWS, Azure, and GCP image analysis
-- **Version Compatibility**: Shows only newer versions (same or newer releases, newer patches)
+- **Version Compatibility**: Selects only acceptable versions based on base version (major.minor.micro) and patch level (p-level).
 - **Date Comparison**: Compares images based on `created` and `published` timestamps
 - **Comprehensive Reporting**: Generates detailed reports showing runtime image candidates
 - **Region Information**: Displays available regions and image IDs for each cloud provider
-- **Architecture Filtering**: Ensures candidates have the same architecture as the source image
+- **Architecture Filtering**: Ensures candidates have the same architecture as the source image; if the source architecture is unknown/N/A, architecture filtering is relaxed (to avoid false negatives in catalogs that omit this field)
 - **CSV Export**: Generates CSV reports for external tool integration
 
 ## Installation
@@ -77,13 +77,12 @@ python runtime_image_candidate_finder.py --source-imageId d60091f7-06e4-4042-8db
 
 ### Version Filtering Logic
 
-The tool implements intelligent version filtering to ensure compatibility:
+The tool enforces strict, predictable version compatibility:
 
-- **Newer patch versions**: Shows newer patches of the same version (e.g., 7.3.1-p400 → 7.3.1-p406)
-- **Newer minor versions**: Shows newer minor releases (e.g., 7.2.17 → 7.3.1)
-- **Newer major versions**: Shows newer major releases (e.g., 7.x → 8.x)
-- **Excludes older versions**: Never shows images with older version numbers
-- **Excludes same versions**: Never shows images with identical version and patch numbers
+- **Reject lower base versions**: Candidates with a lower base version (e.g., 7.2.17 when source is 7.2.18) are excluded regardless of dates.
+- **Same base version**: Candidates must have the same or higher patch level (p-level). In addition, candidates must be newer by timestamp (created/published), so equal p-levels only pass if the image is newer in time.
+- **Higher base versions allowed**: Newer minor or major releases are included (e.g., 7.2.18 → 7.3.1 → 7.4.0 ...), subject to timestamp recency and provider/architecture constraints.
+- **Timestamp recency**: All candidates must be strictly newer by `created` (fallback `published`) timestamp than the source image.
 
 ## Output
 
@@ -91,9 +90,9 @@ The tool generates both a console report and a CSV file:
 
 ### Console Report Behavior
 
-- **No `--newer` parameter**: Shows only the latest candidate image with a note that CSV contains all available images
-- **`--newer 1`**: Shows the single latest candidate image
-- **`--newer > 1`**: Shows only the latest candidate image with a note that CSV contains the limited candidate images
+- **No `--newer` parameter**: Shows one latest image per base version family, starting from the source base upward (e.g., latest 7.2.18.pXXXX, then latest 7.3.1.pXXXX, ...). CSV contains all available candidate images.
+- **`--newer 1`**: Shows the single latest candidate image (as before).
+- **`--newer > 1`**: Shows one latest image per version family; CSV contains the limited candidate images.
 
 ### CSV Report Behavior
 
@@ -135,7 +134,7 @@ The CSV contains all candidate images based on the `--newer` parameter:
 3. **Version Extraction**: Extracts version information from repository version strings (e.g., 7.3.1-1.cdh7.3.1.p400.67986116 → 7.3.1)
 4. **Architecture Detection**: Identifies the source image architecture (x86_64, arm64, etc.)
 5. **Timestamp Comparison**: Compares image timestamps using `created` field (with `published` as fallback)
-6. **Version Filtering**: Ensures candidate images have newer version numbers (patch, minor, or major)
+6. **Version Filtering**: Enforces base-version gating (no downgrades), allows same-base with ≥ p-level, and requires newer timestamps
 7. **Architecture Filtering**: Ensures candidate images have the same architecture as the source image
 8. **Cloud Provider Filtering**: Ensures candidate images support the specified cloud provider
 9. **Report Generation**: Creates a detailed report showing all runtime image candidates
@@ -213,11 +212,18 @@ The tool automatically creates output folders and manages CSV file placement:
 ## Notes
 
 - The tool fetches the live catalog from the Cloudbreak S3 bucket, ensuring you always have the latest information
-- Version filtering ensures only newer releases are shown, preventing downgrade scenarios
-- Image timestamps are compared using Unix timestamps for accurate chronological ordering
+- Version filtering prevents downgrades by excluding candidates with lower base versions than the source
+- Equal p-levels on the same base are permitted only when the candidate is newer by timestamp, which helps include republished or refreshed images
 - The tool searches both the `base-images` and `versions` sections of the catalog for comprehensive coverage
-- Version information is extracted from repository version strings and displayed prominently
-- Architecture filtering ensures candidates are compatible with your source image
+- Version information is extracted from repository version strings and displayed prominently; base version and p-level are derived when present
+- Architecture filtering is relaxed only when the source architecture is unknown/N/A to avoid excluding valid candidates
 - Cloud provider support is verified before including images in the candidate analysis
 - CSV export enables integration with external tools for custom image creation
 - Output folders are automatically created and managed for organized file storage
+
+## Recent Changes
+
+- Enforced base-version gating to exclude lower-version candidates (e.g., no 7.2.17 when source is 7.2.18)
+- Allowed same-base candidates with equal/higher p-levels provided they are newer by timestamp
+- Summary now shows one latest image per version family, starting from the source base upward
+- Relaxed architecture filtering when the source architecture is unknown/N/A

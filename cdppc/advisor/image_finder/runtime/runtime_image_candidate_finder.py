@@ -142,27 +142,121 @@ class RuntimeImageCandidateFinder:
                 return (major, minor, patch)
         except (ValueError, IndexError):
             return None
+
+    def parse_base_and_p_level(self, version_str: str) -> Optional[Tuple[Tuple[int, int, int], Optional[int]]]:
+        """Parse repository version into base semantic version (major, minor, micro) and p-level.
+
+        Examples:
+          - '7.2.18-1.cdh7.2.18.p1101.6899' -> ((7, 2, 18), 1101)
+          - '7.3.1-1.cdh7.3.1.p400.x' -> ((7, 3, 1), 400)
+          - '7.3.1' -> ((7, 3, 1), None)
+        """
+        if not version_str:
+            return None
+        try:
+            if '.p' in version_str and '-1.cdh' in version_str:
+                version_part = version_str.split('-')[0]  # e.g., '7.2.18'
+                base_parts = version_part.split('.')
+                base_major = int(base_parts[0]) if len(base_parts) > 0 else 0
+                base_minor = int(base_parts[1]) if len(base_parts) > 1 else 0
+                base_patch = int(base_parts[2]) if len(base_parts) > 2 else 0
+                p_level_str = version_str.split('.p')[1].split('.')[0]
+                p_level = int(p_level_str)
+                return (base_major, base_minor, base_patch), p_level
+            else:
+                parts = version_str.split('.')
+                base_major = int(parts[0]) if len(parts) > 0 else 0
+                base_minor = int(parts[1]) if len(parts) > 1 else 0
+                base_patch = int(parts[2]) if len(parts) > 2 else 0
+                return (base_major, base_minor, base_patch), None
+        except (ValueError, IndexError):
+            return None
+
+    def select_latest_per_base_version(self, images: List[Dict], source_base: Optional[Tuple[int, int, int]] = None) -> List[Dict]:
+        """From a list of images, select the latest image per base runtime version (major.minor.micro).
+
+        "Latest" is primarily determined by highest p-level when available; ties (or missing p-level)
+        are broken by the newer created/published timestamp.
+        """
+        best_by_base = {}
+        for image in images:
+            version_str = self.extract_version(image)
+            parsed = self.parse_base_and_p_level(version_str) if version_str else None
+            if not parsed:
+                # Fallback key for images without recognizable versioning
+                base_key = ('unknown', 'unknown', 'unknown')
+                p_level = None
+            else:
+                base_key, p_level = parsed
+
+            current_best = best_by_base.get(base_key)
+
+            if not current_best:
+                best_by_base[base_key] = (image, p_level)
+                continue
+
+            best_image, best_p_level = current_best
+            candidate_p = p_level if p_level is not None else -1
+            best_p = best_p_level if best_p_level is not None else -1
+
+            if candidate_p > best_p:
+                best_by_base[base_key] = (image, p_level)
+            elif candidate_p == best_p:
+                # Use timestamp to decide
+                if self.get_image_timestamp(image) > self.get_image_timestamp(best_image):
+                    best_by_base[base_key] = (image, p_level)
+
+        # Build ordered list: start with source base (if present), then higher bases, exclude lower bases
+        def is_numeric_base(b):
+            return isinstance(b, tuple) and len(b) == 3 and all(isinstance(v, int) for v in b)
+
+        items = list(best_by_base.items())
+
+        # Filter to >= source_base if provided and numeric
+        filtered_items = []
+        for base_key, pair in items:
+            if not is_numeric_base(base_key):
+                continue
+            if source_base and is_numeric_base(source_base):
+                if base_key < source_base:
+                    continue
+            filtered_items.append((base_key, pair))
+
+        # Sort: source base first, then ascending by base
+        def sort_key(entry):
+            base_key = entry[0]
+            if source_base and is_numeric_base(base_key) and base_key == source_base:
+                return (-1, base_key)
+            return (0, base_key)
+
+        sorted_items = sorted(filtered_items, key=sort_key)
+        return [img for (_, (img, _)) in sorted_items]
     
     def is_compatible_version(self, source_version: str, candidate_version: str) -> bool:
-        """Check if candidate version is newer release than source version"""
-        source_parsed = self.parse_version(source_version)
-        candidate_parsed = self.parse_version(candidate_version)
-        
-        if not source_parsed or not candidate_parsed:
+        """Check if candidate version is acceptable relative to the source.
+
+        Rules:
+          - Determine base version (major.minor.micro) and p-level from repository version strings
+          - Reject candidates with a lower base version than the source (e.g., 7.2.17 < 7.2.18)
+          - If base versions are equal, allow same or higher p-level (timestamp will enforce actual recency)
+          - Allow all higher base versions (e.g., 7.3.1 > 7.2.18)
+        """
+        src = self.parse_base_and_p_level(source_version) if source_version else None
+        cand = self.parse_base_and_p_level(candidate_version) if candidate_version else None
+
+        if not src or not cand:
+            # If either cannot be parsed reliably, do not block on version; timestamp filter still applies
             return True
-        
-        source_major, source_minor, source_patch = source_parsed
-        candidate_major, candidate_minor, candidate_patch = candidate_parsed
-        
-        if candidate_major == source_major:
-            if candidate_minor > source_minor:
-                return True
-            elif candidate_minor == source_minor:
-                return candidate_patch > source_patch
-            else:
-                return False
-        
-        return candidate_major > source_major
+
+        source_base, source_p = src
+        candidate_base, candidate_p = cand
+
+        if candidate_base == source_base:
+            src_p = source_p if source_p is not None else -1
+            cand_p = candidate_p if candidate_p is not None else -1
+            return cand_p >= src_p
+
+        return candidate_base > source_base
     
     def find_newer_images(self, source_image: Dict, cloud_provider: str, source_timestamp: int, source_architecture: str, source_version: str) -> List[Dict]:
         """Find newer images for the specified cloud provider"""
@@ -221,8 +315,12 @@ class RuntimeImageCandidateFinder:
         if image_timestamp <= source_timestamp:
             return False
         
-        if image.get('architecture') != source_architecture:
-            return False
+        # Only enforce architecture match when the source architecture is known.
+        # Some catalog entries omit architecture (shows as N/A). In that case, do not filter by architecture.
+        if source_architecture:
+            candidate_architecture = image.get('architecture')
+            if candidate_architecture and candidate_architecture != source_architecture:
+                return False
         
         if 'images' not in image:
             return False
@@ -463,7 +561,12 @@ class RuntimeImageCandidateFinder:
             return False
         
         source_timestamp = self.get_image_timestamp(source_image)
-        source_architecture = source_image.get('architecture', 'unknown')
+        # Normalize architecture: treat missing/placeholder values as unknown (None) so we don't over-filter
+        raw_arch = source_image.get('architecture')
+        if raw_arch and str(raw_arch).strip().lower() not in {"n/a", "na", "none", "unknown", "null"}:
+            source_architecture = raw_arch
+        else:
+            source_architecture = None
         source_version = self.extract_version(source_image)
         
         newer_images = self.find_newer_images(source_image, cloud_provider, source_timestamp, source_architecture, source_version)
@@ -477,13 +580,19 @@ class RuntimeImageCandidateFinder:
         print(f"✓ Found {len(newer_images)} runtime image candidates with {source_architecture} architecture{version_info}")
         
         if not newer_limit or newer_limit > 1:
-            display_images = newer_images[:1] if newer_images else []
+            # Show latest image per base version family in the summary, starting from the source base upward
+            source_base = None
+            if source_version:
+                parsed_base = self.parse_base_and_p_level(source_version)
+                if parsed_base:
+                    source_base = parsed_base[0]
+            display_images = self.select_latest_per_base_version(newer_images, source_base) if newer_images else []
             report = self.generate_report(source_image, display_images, cloud_provider)
             print("\n" + report)
             if newer_limit and newer_limit > 1:
-                print(f"Note: Showing latest image only. CSV contains the {len(newer_images)} limited candidate images.")
+                print(f"Note: Showing one latest image per version family. CSV contains the {len(newer_images)} limited candidate images.")
             else:
-                print(f"Note: Showing latest image only. CSV contains all {original_count} available candidate images.")
+                print(f"Note: Showing one latest image per version family. CSV contains all {original_count} available candidate images.")
         else:
             report = self.generate_report(source_image, newer_images, cloud_provider)
             print("\n" + report)
