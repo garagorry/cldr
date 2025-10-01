@@ -237,21 +237,22 @@ class ConfigComparator:
         """Generate a PUT command based on the file type and location."""
         # Determine if this is a cluster service, cluster role, or MGMT service/role
         file_path_str = str(source_file)
+        actual_filename = source_file.name  # Use the actual filename from the file path
         
         if 'ClusterServices' in file_path_str:
             if 'roleConfigGroups' in file_path_str:
                 # Cluster role config group
-                service_name = self.extract_service_name(filename)
-                role_name = self.extract_role_name(filename)
+                service_name = self.extract_service_name(actual_filename)
+                role_name = self.extract_role_name(actual_filename)
                 return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
             else:
                 # Cluster service config
-                service_name = self.extract_service_name(filename)
+                service_name = self.extract_service_name(actual_filename)
                 return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
         elif 'MGMT_Services' in file_path_str:
             if 'roleConfigGroups' in file_path_str:
                 # MGMT role config group
-                role_group = self.extract_mgmt_role_group(filename)
+                role_group = self.extract_mgmt_role_group(actual_filename)
                 return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/cm/service/roleConfigGroups/{role_group}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
             else:
                 # MGMT service config
@@ -262,26 +263,76 @@ class ConfigComparator:
     
     def extract_service_name(self, filename: str) -> str:
         """Extract service name from filename."""
-        # Example: hostname_cluster_service_config -> service
-        parts = filename.split('_')
-        if len(parts) >= 3:
-            return parts[2]
+        # Examples:
+        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_hdfs_config.json -> hdfs
+        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_yarn_yarn-JOBHISTORY-BASE_config.json -> yarn
+        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_spark3_on_yarn_spark3_on_yarn-SPARK3_YARN_HISTORY_SERVER-BASE_config.json -> spark3_on_yarn
+        
+        # Remove .json extension
+        name_without_ext = filename.replace('.json', '')
+        
+        # Split by underscores
+        parts = name_without_ext.split('_')
+        
+        # Look for the pattern: hostname_cluster_service_... or hostname_cluster_service_role_...
+        # The service name is typically the first meaningful part after the cluster name
+        for i, part in enumerate(parts):
+            if part in ['hdfs', 'yarn', 'hive', 'zookeeper', 'kafka', 'spark', 'impala', 'solr', 'kudu', 'flink', 'nifi', 'oozie', 'hue', 'ranger', 'knox', 'livy', 'zeppelin', 'superset', 'airflow', 'presto', 'trino', 'druid', 'kylin', 'phoenix', 'accumulo', 'storm', 'samza', 'beam', 'flume', 'sqoop', 'tez', 'atlas', 'spark3', 'spark3_on_yarn', 'hive_on_tez', 'ranger_raz', 'livy_for_spark3', 'query_processor', 'queuemanager']:
+                return part
+            elif 'spark3_on_yarn' in part or 'hive_on_tez' in part or 'ranger_raz' in part or 'livy_for_spark3' in part or 'query_processor' in part or 'queuemanager' in part:
+                return part
+        
+        # If no service found, try to extract from the last meaningful parts
+        if len(parts) >= 2:
+            # Look for service name in the last few parts
+            for i in range(len(parts) - 1, max(0, len(parts) - 4), -1):
+                if parts[i] in ['hdfs', 'yarn', 'hive', 'zookeeper', 'kafka', 'spark', 'impala', 'solr', 'kudu', 'flink', 'nifi', 'oozie', 'hue', 'ranger', 'knox', 'livy', 'zeppelin', 'superset', 'airflow', 'presto', 'trino', 'druid', 'kylin', 'phoenix', 'accumulo', 'storm', 'samza', 'beam', 'flume', 'sqoop', 'tez', 'atlas', 'spark3', 'spark3_on_yarn', 'hive_on_tez', 'ranger_raz', 'livy_for_spark3', 'query_processor', 'queuemanager']:
+                    return parts[i]
+        
         return "unknown_service"
     
     def extract_role_name(self, filename: str) -> str:
         """Extract role name from filename."""
-        # Example: hostname_cluster_service_role_config -> role
-        parts = filename.split('_')
-        if len(parts) >= 4:
-            return parts[3]
+        # Examples:
+        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_yarn_yarn-JOBHISTORY-BASE_config.json -> yarn-JOBHISTORY-BASE
+        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_hdfs_hdfs-DATANODE-BASE_config.json -> hdfs-DATANODE-BASE
+        
+        # Remove .json extension
+        name_without_ext = filename.replace('.json', '')
+        
+        # Split by underscores
+        parts = name_without_ext.split('_')
+        
+        # Look for role patterns (typically contain dashes and role names)
+        # Skip the first part (hostname) and look for role patterns
+        for i, part in enumerate(parts):
+            if i == 0:  # Skip hostname part
+                continue
+            if '-' in part and any(role_type in part.upper() for role_type in ['BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR', 'JOBHISTORY', 'DATANODE', 'NAMENODE', 'JOURNALNODE', 'FAILOVERCONTROLLER', 'NODEMANAGER', 'GATEWAY', 'HUE_SERVER', 'ZEPPELIN_SERVER', 'RANGER_RAZ_SERVER', 'SPARK3_YARN_HISTORY_SERVER', 'QUEUEMANAGER_WEBAPP', 'QUEUEMANAGER_STORE', 'QUERY_PROCESSOR']):
+                return part
+        
         return "unknown_role"
     
     def extract_mgmt_role_group(self, filename: str) -> str:
         """Extract MGMT role group name from filename."""
-        # Example: hostname_MGMT_ROLEGROUP_role_config -> ROLEGROUP
-        parts = filename.split('_')
-        if len(parts) >= 3 and parts[1] == 'MGMT':
-            return parts[2]
+        # Example: jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_MGMT_MGMT-REPORTSMANAGER-BASE_role_config.json -> MGMT-REPORTSMANAGER-BASE
+        
+        # Remove .json extension
+        name_without_ext = filename.replace('.json', '')
+        
+        # Split by underscores
+        parts = name_without_ext.split('_')
+        
+        # Look for MGMT role group pattern
+        # The pattern is: hostname_MGMT_MGMT-ROLEGROUP-BASE_role_config
+        for i, part in enumerate(parts):
+            if part == 'MGMT' and i + 1 < len(parts):
+                # The next part should be the role group name (e.g., MGMT-REPORTSMANAGER-BASE)
+                role_group = parts[i + 1]
+                # Verify it starts with MGMT- and contains role type indicators
+                if role_group.startswith('MGMT-') and any(role_type in role_group.upper() for role_type in ['BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR', 'REPORTSMANAGER', 'SERVICEMONITOR', 'EVENTSERVER', 'TELEMETRYPUBLISHER', 'ALERTPUBLISHER']):
+                    return role_group
+        
         return "unknown_mgmt_role"
     
     def generate_csv_report(self, differences: List[Dict[str, Any]], output_file: str):
