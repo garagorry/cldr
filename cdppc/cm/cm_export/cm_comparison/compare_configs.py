@@ -281,6 +281,9 @@ class ConfigComparator:
                 return part
             elif 'spark3_on_yarn' in part or 'hive_on_tez' in part or 'ranger_raz' in part or 'livy_for_spark3' in part or 'query_processor' in part or 'queuemanager' in part:
                 return part
+            elif part.startswith('knox-') or part.startswith('zookeeper-'):
+                # Handle service names with suffixes like knox-454d, zookeeper-e38f
+                return part.split('-')[0]  # Return knox, zookeeper
         
         # If no service found, try to extract from the last meaningful parts
         if len(parts) >= 2:
@@ -335,8 +338,116 @@ class ConfigComparator:
         
         return "unknown_mgmt_role"
     
+    def generate_consolidated_api_calls(self, differences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Generate consolidated API calls grouped by service and role."""
+        consolidated_calls = []
+        
+        # Group differences by service/role combination
+        grouped_diffs = {}
+        
+        for diff in differences:
+            # Extract service and role information from the put_command
+            put_command = diff['put_command']
+            
+            # Determine the grouping key based on the API endpoint
+            if '/cm/service/roleConfigGroups/' in put_command:
+                # MGMT role config group
+                # Extract role group from URL like: /api/v53/cm/service/roleConfigGroups/MGMT-REPORTSMANAGER-BASE/config
+                role_group = put_command.split('/cm/service/roleConfigGroups/')[1].split('/config')[0]
+                group_key = f"MGMT_ROLE_{role_group}"
+                service_type = "MGMT_ROLE"
+                service_name = "MGMT"
+                role_name = role_group
+            elif '/clusters/' in put_command and '/roleConfigGroups/' in put_command:
+                # Cluster role config group
+                # Extract service and role from URL like: /api/v53/clusters/${CM_CLUSTER_NAME}/services/yarn/roleConfigGroups/yarn-JOBHISTORY-BASE/config
+                parts = put_command.split('/services/')[1].split('/roleConfigGroups/')
+                service_name = parts[0]
+                role_name = parts[1].split('/config')[0]
+                group_key = f"CLUSTER_ROLE_{service_name}_{role_name}"
+                service_type = "CLUSTER_ROLE"
+            elif '/clusters/' in put_command and '/services/' in put_command and '/config' in put_command:
+                # Cluster service config
+                # Extract service from URL like: /api/v53/clusters/${CM_CLUSTER_NAME}/services/hdfs/config
+                service_name = put_command.split('/services/')[1].split('/config')[0]
+                group_key = f"CLUSTER_SERVICE_{service_name}"
+                service_type = "CLUSTER_SERVICE"
+                role_name = None
+            else:
+                # Skip unknown patterns
+                continue
+            
+            if group_key not in grouped_diffs:
+                grouped_diffs[group_key] = {
+                    'service_type': service_type,
+                    'service_name': service_name,
+                    'role_name': role_name,
+                    'properties': [],
+                    'api_endpoint': self.extract_api_endpoint(put_command)
+                }
+            
+            grouped_diffs[group_key]['properties'].append({
+                'name': diff['property_name'],
+                'value': diff['source_value'],
+                'action': diff['action']
+            })
+        
+        # Generate consolidated API calls
+        for group_key, group_data in grouped_diffs.items():
+            # Create items array for the JSON payload
+            items = []
+            for prop in group_data['properties']:
+                items.append({
+                    "name": prop['name'],
+                    "value": prop['value']
+                })
+            
+            # Generate the consolidated PUT command
+            consolidated_command = self.generate_consolidated_put_command(
+                group_data['service_type'],
+                group_data['service_name'],
+                group_data['role_name'],
+                items,
+                group_data['api_endpoint']
+            )
+            
+            consolidated_calls.append({
+                'group_key': group_key,
+                'service_type': group_data['service_type'],
+                'service_name': group_data['service_name'],
+                'role_name': group_data['role_name'],
+                'property_count': len(group_data['properties']),
+                'properties': '; '.join([f"{p['name']}={p['value']}" for p in group_data['properties']]),
+                'consolidated_put_command': consolidated_command,
+                'json_payload': json.dumps({"items": items}, indent=2)
+            })
+        
+        return consolidated_calls
+    
+    def extract_api_endpoint(self, put_command: str) -> str:
+        """Extract the base API endpoint from a PUT command."""
+        # Extract the URL part before the query parameters
+        if ' -d ' in put_command:
+            return put_command.split(' -d ')[0].strip()
+        return put_command
+    
+    def generate_consolidated_put_command(self, service_type: str, service_name: str, role_name: str, items: List[Dict], api_endpoint: str) -> str:
+        """Generate a consolidated PUT command with all properties."""
+        # Create the JSON payload
+        json_payload = json.dumps({"items": items})
+        
+        # Use the existing API endpoint structure but with consolidated payload
+        if service_type == "MGMT_ROLE":
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/cm/service/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
+        elif service_type == "CLUSTER_ROLE":
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
+        elif service_type == "CLUSTER_SERVICE":
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
+        else:
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/config" -H "content-type:application/json" -d \'{json_payload}\''
+
     def generate_csv_report(self, differences: List[Dict[str, Any]], output_file: str):
-        """Generate a CSV report with the differences."""
+        """Generate a CSV report with the differences and consolidated API calls."""
         if not differences:
             print("No differences found. Configurations are identical.")
             # Still create a CSV file with a summary row
@@ -363,7 +474,11 @@ class ConfigComparator:
             
             print(f"Summary CSV created: {output_file}")
             return
-            
+        
+        # Generate consolidated API calls
+        consolidated_calls = self.generate_consolidated_api_calls(differences)
+        
+        # Create the detailed CSV
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = [
                 'filename', 'property_name', 'source_value', 'target_value', 
@@ -376,8 +491,24 @@ class ConfigComparator:
             for diff in differences:
                 writer.writerow(diff)
         
-        print(f"CSV report generated: {output_file}")
+        # Create the consolidated CSV
+        consolidated_output_file = output_file.replace('.csv', '_consolidated.csv')
+        with open(consolidated_output_file, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = [
+                'group_key', 'service_type', 'service_name', 'role_name', 
+                'property_count', 'properties', 'consolidated_put_command', 'json_payload'
+            ]
+            
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for call in consolidated_calls:
+                writer.writerow(call)
+        
+        print(f"Detailed CSV report generated: {output_file}")
+        print(f"Consolidated CSV report generated: {consolidated_output_file}")
         print(f"Total differences found: {len(differences)}")
+        print(f"Consolidated API calls: {len(consolidated_calls)}")
         
         # Summary by action type
         action_counts = {}
