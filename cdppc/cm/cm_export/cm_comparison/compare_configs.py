@@ -63,6 +63,9 @@ class ConfigComparator:
         self.discovered_services = set()
         self.discovered_roles = set()
         self.discovered_mgmt_roles = set()
+        self.discovered_role_types = set()
+        self.discovered_service_patterns = set()
+        self.discovered_skip_words = set()
         self.api_version = "v53"  # Default fallback
         self._discover_services_and_roles()
     
@@ -76,13 +79,19 @@ class ConfigComparator:
         # Discover from API control files if available
         self._discover_from_api_control_files()
         
-        # Discover from configuration files
+        # Discover from configuration files (first pass - learn patterns)
         self._discover_from_config_files()
+        
+        # Second pass - extract services and roles using learned patterns
+        self._extract_services_and_roles_from_files()
         
         print(f"Discovered API version: {self.api_version}")
         print(f"Discovered {len(self.discovered_services)} services: {sorted(self.discovered_services)}")
         print(f"Discovered {len(self.discovered_roles)} roles: {sorted(self.discovered_roles)}")
         print(f"Discovered {len(self.discovered_mgmt_roles)} MGMT roles: {sorted(self.discovered_mgmt_roles)}")
+        print(f"Discovered {len(self.discovered_role_types)} role types: {sorted(self.discovered_role_types)}")
+        print(f"Discovered {len(self.discovered_service_patterns)} service patterns: {sorted(self.discovered_service_patterns)}")
+        print(f"Discovered {len(self.discovered_skip_words)} skip words: {sorted(self.discovered_skip_words)}")
     
     def _discover_api_version(self):
         """Discover API version from exported data."""
@@ -156,60 +165,122 @@ class ConfigComparator:
             self._extract_service_role_from_filename(json_file.name)
     
     def _extract_service_role_from_filename(self, filename: str):
-        """Extract service and role information from filename."""
+        """Extract service and role information from filename using dynamic patterns."""
         # Remove .json extension
         name_without_ext = filename.replace('.json', '')
         
         # Split by underscores
         parts = name_without_ext.split('_')
         
-        # Look for service names (skip hostname and cluster name)
+        # First pass: learn patterns from this filename
+        self._learn_patterns_from_filename(parts)
+    
+    def _extract_services_and_roles_from_files(self):
+        """Second pass: extract services and roles using learned patterns."""
+        # Extract from source directory
+        for json_file in self.source_dir.rglob("*.json"):
+            self._extract_from_filename_parts(json_file.name)
+        
+        # Extract from target directory
+        for json_file in self.target_dir.rglob("*.json"):
+            self._extract_from_filename_parts(json_file.name)
+    
+    def _extract_from_filename_parts(self, filename: str):
+        """Extract services and roles from filename using learned patterns."""
+        # Remove .json extension
+        name_without_ext = filename.replace('.json', '')
+        
+        # Split by underscores
+        parts = name_without_ext.split('_')
+        
+        # Extract services and roles using learned patterns
+        self._extract_services_from_parts(parts)
+        self._extract_roles_from_parts(parts)
+    
+    def _learn_patterns_from_filename(self, parts: list):
+        """Learn patterns from filename parts to identify services and roles."""
         for i, part in enumerate(parts):
-            if i < 2:  # Skip hostname and cluster name
-                continue
+            # Learn skip words (common non-service words and cluster-specific patterns)
+            if (len(part) <= 3 or 
+                part.lower() in ['config', 'role', 'service', 'settings', 'context', 'core', 'data', 'for', 'all'] or
+                part.isdigit() or
+                '.' in part or  # Likely hostname or FQDN
+                part.startswith('jdga-') or  # Cluster-specific patterns
+                (len(part) > 8 and '-' in part and any(char.isdigit() for char in part) and not part.split('-')[0].islower())):  # Likely cluster-specific IDs, but not service names with IDs
+                self.discovered_skip_words.add(part)
             
-            # Skip common non-service words
-            if part in ['config', 'role', 'service', 'settings', 'context', 'core', 'data', 'for']:
+            # Learn service patterns (multi-part services) - but skip cluster-specific ones
+            if i + 1 < len(parts):
+                combined = f"{part}_{parts[i+1]}"
+                # If it looks like a service name (lowercase, meaningful length, not cluster-specific)
+                if (len(combined) > 5 and 
+                    combined.islower() and 
+                    '_' in combined and
+                    not any(skip in combined.lower() for skip in ['config', 'role', 'service', 'settings']) and
+                    not combined.startswith('jdga-') and  # Skip cluster-specific patterns
+                    not any(char.isdigit() for char in combined.split('_')[0])):  # Skip patterns starting with cluster IDs
+                    self.discovered_service_patterns.add(combined)
+            
+            # Learn role patterns (contain dashes and uppercase parts)
+            if '-' in part:
+                role_parts = part.split('-')
+                for role_part in role_parts:
+                    if role_part.isupper() and len(role_part) > 2:
+                        self.discovered_role_types.add(role_part)
+    
+    def _extract_services_from_parts(self, parts: list):
+        """Extract services from filename parts using learned patterns."""
+        for i, part in enumerate(parts):
+            # Skip known skip words and cluster-specific patterns
+            if (part in self.discovered_skip_words or
+                part.startswith('jdga-') or
+                ('.' in part) or  # Skip FQDNs
+                (len(part) > 3 and any(char.isdigit() for char in part) and '-' in part)):  # Skip cluster IDs
                 continue
             
             # Check for multi-part service names
             if i + 1 < len(parts):
                 combined = f"{part}_{parts[i+1]}"
-                if any(service in combined for service in ['query_processor', 'spark3_on_yarn', 'livy_for_spark3', 'ranger_raz', 'hive_on_tez']):
+                if (combined in self.discovered_service_patterns and
+                    not combined.startswith('jdga-') and
+                    not any(char.isdigit() for char in combined.split('_')[0])):
                     self.discovered_services.add(combined)
                     continue
             
-            # Check for services with suffixes
-            if '-' in part and any(prefix in part for prefix in ['knox-', 'zookeeper-', 'data_context_connector-']):
+            # Check for services with suffixes (extract base name)
+            if '-' in part and not part.isupper():
                 base_service = part.split('-')[0]
-                self.discovered_services.add(base_service)
-                continue
+                # Check if this looks like a service name (not a cluster ID or role)
+                if (len(base_service) > 2 and 
+                    base_service.islower() and 
+                    base_service not in self.discovered_skip_words and
+                    not base_service.startswith('jdga-') and
+                    not any(char.isdigit() for char in base_service) and
+                    not base_service.isupper() and  # Not a role type
+                    base_service not in self.discovered_role_types):  # Not a discovered role type
+                    self.discovered_services.add(base_service)
+                    continue
             
-            # Check for single-word services (must be meaningful service names)
-            if (len(part) > 2 and not part.isupper() and 
-                part not in ['config', 'role', 'service', 'settings', 'context', 'core', 'data', 'for', 'processor', 'raz'] and
-                not part.startswith('hdfs-') and not part.startswith('yarn-') and not part.startswith('hms-') and
-                not part.startswith('knox-') and not part.startswith('zookeeper-') and not part.startswith('spark3-') and
-                not part.startswith('tez-') and not part.startswith('sqoop-') and not part.startswith('oozie-') and
-                not part.startswith('hue-') and not part.startswith('zeppelin-') and not part.startswith('queuemanager-') and
-                not part.startswith('settings-') and not part.startswith('connector-') and not part.startswith('query_processor-') and
-                not part.startswith('ranger_raz-') and not part.startswith('raz-')):
+            # Check for single-word services
+            if (len(part) > 2 and 
+                part.islower() and 
+                part not in self.discovered_skip_words and
+                not any(role_type in part.upper() for role_type in self.discovered_role_types) and
+                not part.startswith(('-', '_')) and
+                not part.startswith('jdga-') and
+                not any(char.isdigit() for char in part)):
                 self.discovered_services.add(part)
-        
-        # Look for role names (usually contain dashes and uppercase parts)
+    
+    def _extract_roles_from_parts(self, parts: list):
+        """Extract roles from filename parts using learned patterns."""
         for part in parts:
-            if '-' in part and any(role_type in part.upper() for role_type in [
-                'BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR',
-                'JOBHISTORY', 'DATANODE', 'NAMENODE', 'JOURNALNODE', 'FAILOVERCONTROLLER', 'NODEMANAGER',
-                'HUE_SERVER', 'KT_RENEWER', 'HUE_LOAD_BALANCER', 'RESOURCEMANAGER', 'SPARK3_YARN_HISTORY_SERVER',
-                'RANGER_RAZ_SERVER', 'ZEPPELIN_SERVER', 'QUEUEMANAGER', 'QUERY_PROCESSOR', 'NAVIGATORMETASERVER',
-                'EVENTSERVER', 'SERVICEMONITOR', 'ALERTPUBLISHER', 'REPORTSMANAGER', 'HOSTMONITOR',
-                'ACTIVITYMONITOR', 'NAVIGATOR', 'TELEMETRYPUBLISHER'
-            ]):
-                if part.startswith('MGMT-'):
-                    self.discovered_mgmt_roles.add(part)
-                else:
-                    self.discovered_roles.add(part)
+            if '-' in part:
+                # Check if this looks like a role name using learned role types
+                if any(role_type in part.upper() for role_type in self.discovered_role_types):
+                    if part.startswith('MGMT-'):
+                        self.discovered_mgmt_roles.add(part)
+                    else:
+                        self.discovered_roles.add(part)
         
     def should_ignore_property(self, property_name: str) -> bool:
         """Check if a property should be ignored during comparison."""
@@ -274,20 +345,44 @@ class ConfigComparator:
         # Split by underscores and look for meaningful parts
         parts = name_without_ext.split('_')
         
-        # Look for service names or role names
+        # Look for service names or role names using discovered patterns
         if len(parts) >= 3:
-            # Try to find service/role patterns
+            # Try to find service/role patterns using discovered data
             for i, part in enumerate(parts):
-                if part in ['atlas', 'hive', 'hdfs', 'yarn', 'zookeeper', 'kafka', 'spark', 'impala', 'solr', 'kudu', 'flink', 'nifi', 'oozie', 'hue', 'ranger', 'knox', 'livy', 'zeppelin', 'superset', 'airflow', 'presto', 'trino', 'druid', 'kylin', 'phoenix', 'accumulo', 'storm', 'samza', 'beam', 'flume', 'sqoop', 'kafka-connect', 'schema-registry', 'ksql', 'control-center', 'cruise-control', 'rest-proxy', 'kafka-rest', 'kafka-mirror-maker', 'kafka-streams', 'kafka-connect', 'kafka-rest', 'kafka-mirror-maker', 'kafka-streams']:
+                # Check if this part matches any discovered service
+                if part in self.discovered_services:
                     # Found a service name, include it and following parts
                     if i + 1 < len(parts):
                         return '_'.join(parts[i:])
                     else:
                         return part
-                elif part.startswith('MGMT-'):
-                    # Found MGMT role group
+                
+                # Check for multi-part service names
+                if i + 1 < len(parts):
+                    combined = f"{part}_{parts[i+1]}"
+                    if combined in self.discovered_services:
+                        return combined
+                
+                # Check for services with suffixes
+                if '-' in part and not part.isupper():
+                    base_service = part.split('-')[0]
+                    if base_service in self.discovered_services:
+                        return part
+                
+                # Check for MGMT role groups
+                if part.startswith('MGMT-'):
                     return part
-                elif 'config' in part:
+                
+                # Check for discovered roles
+                if part in self.discovered_roles or part in self.discovered_mgmt_roles:
+                    return part
+                
+                # Check for role patterns using discovered role types
+                if '-' in part and any(role_type in part.upper() for role_type in self.discovered_role_types):
+                    return part
+                
+                # Check for config keyword
+                if 'config' in part:
                     # Found config keyword, include previous parts
                     if i > 0:
                         return '_'.join(parts[i-1:])
@@ -468,13 +563,8 @@ class ConfigComparator:
             if part in self.discovered_roles:
                 return part
             
-            # Check for role patterns with common role type indicators
-            if '-' in part and any(role_type in part.upper() for role_type in [
-                'BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR',
-                'JOBHISTORY', 'DATANODE', 'NAMENODE', 'JOURNALNODE', 'FAILOVERCONTROLLER', 'NODEMANAGER',
-                'HUE_SERVER', 'KT_RENEWER', 'HUE_LOAD_BALANCER', 'RESOURCEMANAGER', 'SPARK3_YARN_HISTORY_SERVER',
-                'RANGER_RAZ_SERVER', 'ZEPPELIN_SERVER', 'QUEUEMANAGER', 'QUERY_PROCESSOR'
-            ]):
+            # Check for role patterns with discovered role type indicators
+            if '-' in part and any(role_type in part.upper() for role_type in self.discovered_role_types):
                 return part
         
         return "unknown_role"
@@ -498,12 +588,8 @@ class ConfigComparator:
                 if role_group in self.discovered_mgmt_roles:
                     return role_group
                 
-                # Fallback: verify it starts with MGMT- and contains role type indicators
-                if role_group.startswith('MGMT-') and any(role_type in role_group.upper() for role_type in [
-                    'BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR',
-                    'REPORTSMANAGER', 'SERVICEMONITOR', 'EVENTSERVER', 'TELEMETRYPUBLISHER', 'ALERTPUBLISHER',
-                    'NAVIGATORMETASERVER', 'HOSTMONITOR', 'ACTIVITYMONITOR', 'NAVIGATOR'
-                ]):
+                # Fallback: verify it starts with MGMT- and contains discovered role type indicators
+                if role_group.startswith('MGMT-') and any(role_type in role_group.upper() for role_type in self.discovered_role_types):
                     return role_group
         
         return "unknown_mgmt_role"
