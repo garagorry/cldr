@@ -60,6 +60,131 @@ class ConfigComparator:
         self.source_dir = Path(source_dir)
         self.target_dir = Path(target_dir)
         self.ignored_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in IGNORED_PATTERNS]
+        self.discovered_services = set()
+        self.discovered_roles = set()
+        self.discovered_mgmt_roles = set()
+        self._discover_services_and_roles()
+    
+    def _discover_services_and_roles(self):
+        """Discover services and roles from the actual exported data."""
+        print("Discovering services and roles from exported data...")
+        
+        # Discover from API control files if available
+        self._discover_from_api_control_files()
+        
+        # Discover from configuration files
+        self._discover_from_config_files()
+        
+        print(f"Discovered {len(self.discovered_services)} services: {sorted(self.discovered_services)}")
+        print(f"Discovered {len(self.discovered_roles)} roles: {sorted(self.discovered_roles)}")
+        print(f"Discovered {len(self.discovered_mgmt_roles)} MGMT roles: {sorted(self.discovered_mgmt_roles)}")
+    
+    def _discover_from_api_control_files(self):
+        """Discover services and roles from API control files."""
+        # Look for API control files in source directory
+        api_control_dir = self.source_dir / "api_control_files"
+        if api_control_dir.exists():
+            # Discover cluster services
+            cluster_service_file = api_control_dir / "service_configs" / "get_cluster_service_config_calls.csv"
+            if cluster_service_file.exists():
+                try:
+                    with open(cluster_service_file, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            if 'service_name' in row and row['service_name']:
+                                self.discovered_services.add(row['service_name'])
+                except Exception as e:
+                    print(f"Warning: Could not read cluster service file: {e}")
+            
+            # Discover cluster roles
+            cluster_role_file = api_control_dir / "role_configs" / "get_cluster_role_config_calls.csv"
+            if cluster_role_file.exists():
+                try:
+                    with open(cluster_role_file, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            if 'role_name' in row and row['role_name']:
+                                self.discovered_roles.add(row['role_name'])
+                except Exception as e:
+                    print(f"Warning: Could not read cluster role file: {e}")
+            
+            # Discover MGMT roles
+            mgmt_role_file = api_control_dir / "role_configs" / "get_mgmt_role_config_calls.csv"
+            if mgmt_role_file.exists():
+                try:
+                    with open(mgmt_role_file, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            if 'role_name' in row and row['role_name']:
+                                self.discovered_mgmt_roles.add(row['role_name'])
+                except Exception as e:
+                    print(f"Warning: Could not read MGMT role file: {e}")
+    
+    def _discover_from_config_files(self):
+        """Discover services and roles from configuration file names."""
+        # Discover from source directory
+        for json_file in self.source_dir.rglob("*.json"):
+            self._extract_service_role_from_filename(json_file.name)
+        
+        # Discover from target directory
+        for json_file in self.target_dir.rglob("*.json"):
+            self._extract_service_role_from_filename(json_file.name)
+    
+    def _extract_service_role_from_filename(self, filename: str):
+        """Extract service and role information from filename."""
+        # Remove .json extension
+        name_without_ext = filename.replace('.json', '')
+        
+        # Split by underscores
+        parts = name_without_ext.split('_')
+        
+        # Look for service names (skip hostname and cluster name)
+        for i, part in enumerate(parts):
+            if i < 2:  # Skip hostname and cluster name
+                continue
+            
+            # Skip common non-service words
+            if part in ['config', 'role', 'service', 'settings', 'context', 'core', 'data', 'for']:
+                continue
+            
+            # Check for multi-part service names
+            if i + 1 < len(parts):
+                combined = f"{part}_{parts[i+1]}"
+                if any(service in combined for service in ['query_processor', 'spark3_on_yarn', 'livy_for_spark3', 'ranger_raz', 'hive_on_tez']):
+                    self.discovered_services.add(combined)
+                    continue
+            
+            # Check for services with suffixes
+            if '-' in part and any(prefix in part for prefix in ['knox-', 'zookeeper-', 'data_context_connector-']):
+                base_service = part.split('-')[0]
+                self.discovered_services.add(base_service)
+                continue
+            
+            # Check for single-word services (must be meaningful service names)
+            if (len(part) > 2 and not part.isupper() and 
+                part not in ['config', 'role', 'service', 'settings', 'context', 'core', 'data', 'for', 'processor', 'raz'] and
+                not part.startswith('hdfs-') and not part.startswith('yarn-') and not part.startswith('hms-') and
+                not part.startswith('knox-') and not part.startswith('zookeeper-') and not part.startswith('spark3-') and
+                not part.startswith('tez-') and not part.startswith('sqoop-') and not part.startswith('oozie-') and
+                not part.startswith('hue-') and not part.startswith('zeppelin-') and not part.startswith('queuemanager-') and
+                not part.startswith('settings-') and not part.startswith('connector-') and not part.startswith('query_processor-') and
+                not part.startswith('ranger_raz-') and not part.startswith('raz-')):
+                self.discovered_services.add(part)
+        
+        # Look for role names (usually contain dashes and uppercase parts)
+        for part in parts:
+            if '-' in part and any(role_type in part.upper() for role_type in [
+                'BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR',
+                'JOBHISTORY', 'DATANODE', 'NAMENODE', 'JOURNALNODE', 'FAILOVERCONTROLLER', 'NODEMANAGER',
+                'HUE_SERVER', 'KT_RENEWER', 'HUE_LOAD_BALANCER', 'RESOURCEMANAGER', 'SPARK3_YARN_HISTORY_SERVER',
+                'RANGER_RAZ_SERVER', 'ZEPPELIN_SERVER', 'QUEUEMANAGER', 'QUERY_PROCESSOR', 'NAVIGATORMETASERVER',
+                'EVENTSERVER', 'SERVICEMONITOR', 'ALERTPUBLISHER', 'REPORTSMANAGER', 'HOSTMONITOR',
+                'ACTIVITYMONITOR', 'NAVIGATOR', 'TELEMETRYPUBLISHER'
+            ]):
+                if part.startswith('MGMT-'):
+                    self.discovered_mgmt_roles.add(part)
+                else:
+                    self.discovered_roles.add(part)
         
     def should_ignore_property(self, property_name: str) -> bool:
         """Check if a property should be ignored during comparison."""
@@ -262,12 +387,7 @@ class ConfigComparator:
             return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
     
     def extract_service_name(self, filename: str) -> str:
-        """Extract service name from filename."""
-        # Examples:
-        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_hdfs_config.json -> hdfs
-        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_yarn_yarn-JOBHISTORY-BASE_config.json -> yarn
-        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_spark3_on_yarn_spark3_on_yarn-SPARK3_YARN_HISTORY_SERVER-BASE_config.json -> spark3_on_yarn
-        
+        """Extract service name from filename using discovered services."""
         # Remove .json extension
         name_without_ext = filename.replace('.json', '')
         
@@ -277,29 +397,36 @@ class ConfigComparator:
         # Look for the pattern: hostname_cluster_service_... or hostname_cluster_service_role_...
         # The service name is typically the first meaningful part after the cluster name
         for i, part in enumerate(parts):
-            if part in ['hdfs', 'yarn', 'hive', 'zookeeper', 'kafka', 'spark', 'impala', 'solr', 'kudu', 'flink', 'nifi', 'oozie', 'hue', 'ranger', 'knox', 'livy', 'zeppelin', 'superset', 'airflow', 'presto', 'trino', 'druid', 'kylin', 'phoenix', 'accumulo', 'storm', 'samza', 'beam', 'flume', 'sqoop', 'tez', 'atlas', 'spark3', 'spark3_on_yarn', 'hive_on_tez', 'ranger_raz', 'livy_for_spark3', 'query_processor', 'queuemanager']:
+            # Skip hostname and cluster name parts
+            if i < 2:
+                continue
+            
+            # Check if this part matches any discovered service
+            if part in self.discovered_services:
                 return part
-            elif 'spark3_on_yarn' in part or 'hive_on_tez' in part or 'ranger_raz' in part or 'livy_for_spark3' in part or 'query_processor' in part or 'queuemanager' in part:
-                return part
-            elif part.startswith('knox-') or part.startswith('zookeeper-'):
-                # Handle service names with suffixes like knox-454d, zookeeper-e38f
-                return part.split('-')[0]  # Return knox, zookeeper
+            
+            # Check for services with suffixes (extract base name)
+            if '-' in part:
+                base_service = part.split('-')[0]
+                if base_service in self.discovered_services:
+                    return base_service
+            
+            # Check for multi-part service names (e.g., query_processor split as query + processor)
+            if i + 1 < len(parts):
+                combined = f"{part}_{parts[i+1]}"
+                if combined in self.discovered_services:
+                    return combined
         
         # If no service found, try to extract from the last meaningful parts
         if len(parts) >= 2:
-            # Look for service name in the last few parts
             for i in range(len(parts) - 1, max(0, len(parts) - 4), -1):
-                if parts[i] in ['hdfs', 'yarn', 'hive', 'zookeeper', 'kafka', 'spark', 'impala', 'solr', 'kudu', 'flink', 'nifi', 'oozie', 'hue', 'ranger', 'knox', 'livy', 'zeppelin', 'superset', 'airflow', 'presto', 'trino', 'druid', 'kylin', 'phoenix', 'accumulo', 'storm', 'samza', 'beam', 'flume', 'sqoop', 'tez', 'atlas', 'spark3', 'spark3_on_yarn', 'hive_on_tez', 'ranger_raz', 'livy_for_spark3', 'query_processor', 'queuemanager']:
+                if parts[i] in self.discovered_services:
                     return parts[i]
         
         return "unknown_service"
     
     def extract_role_name(self, filename: str) -> str:
-        """Extract role name from filename."""
-        # Examples:
-        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_yarn_yarn-JOBHISTORY-BASE_config.json -> yarn-JOBHISTORY-BASE
-        # jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_jdga-de-01_hdfs_hdfs-DATANODE-BASE_config.json -> hdfs-DATANODE-BASE
-        
+        """Extract role name from filename using discovered roles."""
         # Remove .json extension
         name_without_ext = filename.replace('.json', '')
         
@@ -311,15 +438,24 @@ class ConfigComparator:
         for i, part in enumerate(parts):
             if i == 0:  # Skip hostname part
                 continue
-            if '-' in part and any(role_type in part.upper() for role_type in ['BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR', 'JOBHISTORY', 'DATANODE', 'NAMENODE', 'JOURNALNODE', 'FAILOVERCONTROLLER', 'NODEMANAGER', 'GATEWAY', 'HUE_SERVER', 'ZEPPELIN_SERVER', 'RANGER_RAZ_SERVER', 'SPARK3_YARN_HISTORY_SERVER', 'QUEUEMANAGER_WEBAPP', 'QUEUEMANAGER_STORE', 'QUERY_PROCESSOR']):
+            
+            # Check if this part matches any discovered role
+            if part in self.discovered_roles:
+                return part
+            
+            # Check for role patterns with common role type indicators
+            if '-' in part and any(role_type in part.upper() for role_type in [
+                'BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR',
+                'JOBHISTORY', 'DATANODE', 'NAMENODE', 'JOURNALNODE', 'FAILOVERCONTROLLER', 'NODEMANAGER',
+                'HUE_SERVER', 'KT_RENEWER', 'HUE_LOAD_BALANCER', 'RESOURCEMANAGER', 'SPARK3_YARN_HISTORY_SERVER',
+                'RANGER_RAZ_SERVER', 'ZEPPELIN_SERVER', 'QUEUEMANAGER', 'QUERY_PROCESSOR'
+            ]):
                 return part
         
         return "unknown_role"
     
     def extract_mgmt_role_group(self, filename: str) -> str:
-        """Extract MGMT role group name from filename."""
-        # Example: jdga-de-01-manager1.jdga-it1.a465-9q4k.cloudera.site_MGMT_MGMT-REPORTSMANAGER-BASE_role_config.json -> MGMT-REPORTSMANAGER-BASE
-        
+        """Extract MGMT role group name from filename using discovered MGMT roles."""
         # Remove .json extension
         name_without_ext = filename.replace('.json', '')
         
@@ -332,8 +468,17 @@ class ConfigComparator:
             if part == 'MGMT' and i + 1 < len(parts):
                 # The next part should be the role group name (e.g., MGMT-REPORTSMANAGER-BASE)
                 role_group = parts[i + 1]
-                # Verify it starts with MGMT- and contains role type indicators
-                if role_group.startswith('MGMT-') and any(role_type in role_group.upper() for role_type in ['BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR', 'REPORTSMANAGER', 'SERVICEMONITOR', 'EVENTSERVER', 'TELEMETRYPUBLISHER', 'ALERTPUBLISHER']):
+                
+                # Check if this role group is in our discovered MGMT roles
+                if role_group in self.discovered_mgmt_roles:
+                    return role_group
+                
+                # Fallback: verify it starts with MGMT- and contains role type indicators
+                if role_group.startswith('MGMT-') and any(role_type in role_group.upper() for role_type in [
+                    'BASE', 'SERVER', 'MANAGER', 'GATEWAY', 'WORKER', 'COMPUTE', 'WEBAPP', 'STORE', 'PROCESSOR',
+                    'REPORTSMANAGER', 'SERVICEMONITOR', 'EVENTSERVER', 'TELEMETRYPUBLISHER', 'ALERTPUBLISHER',
+                    'NAVIGATORMETASERVER', 'HOSTMONITOR', 'ACTIVITYMONITOR', 'NAVIGATOR'
+                ]):
                     return role_group
         
         return "unknown_mgmt_role"
@@ -346,30 +491,27 @@ class ConfigComparator:
         grouped_diffs = {}
         
         for diff in differences:
-            # Extract service and role information from the put_command
-            put_command = diff['put_command']
+            # Extract service and role information from the source file path instead of put_command
+            source_file = Path(diff['source_file'])
+            actual_filename = source_file.name
             
-            # Determine the grouping key based on the API endpoint
-            if '/cm/service/roleConfigGroups/' in put_command:
+            # Determine the grouping key based on the file path
+            if 'MGMT_Services' in str(source_file):
                 # MGMT role config group
-                # Extract role group from URL like: /api/v53/cm/service/roleConfigGroups/MGMT-REPORTSMANAGER-BASE/config
-                role_group = put_command.split('/cm/service/roleConfigGroups/')[1].split('/config')[0]
+                role_group = self.extract_mgmt_role_group(actual_filename)
                 group_key = f"MGMT_ROLE_{role_group}"
                 service_type = "MGMT_ROLE"
                 service_name = "MGMT"
                 role_name = role_group
-            elif '/clusters/' in put_command and '/roleConfigGroups/' in put_command:
+            elif 'ClusterServices' in str(source_file) and 'roleConfigGroups' in str(source_file):
                 # Cluster role config group
-                # Extract service and role from URL like: /api/v53/clusters/${CM_CLUSTER_NAME}/services/yarn/roleConfigGroups/yarn-JOBHISTORY-BASE/config
-                parts = put_command.split('/services/')[1].split('/roleConfigGroups/')
-                service_name = parts[0]
-                role_name = parts[1].split('/config')[0]
+                service_name = self.extract_service_name(actual_filename)
+                role_name = self.extract_role_name(actual_filename)
                 group_key = f"CLUSTER_ROLE_{service_name}_{role_name}"
                 service_type = "CLUSTER_ROLE"
-            elif '/clusters/' in put_command and '/services/' in put_command and '/config' in put_command:
+            elif 'ClusterServices' in str(source_file) and 'ServiceConfigs' in str(source_file):
                 # Cluster service config
-                # Extract service from URL like: /api/v53/clusters/${CM_CLUSTER_NAME}/services/hdfs/config
-                service_name = put_command.split('/services/')[1].split('/config')[0]
+                service_name = self.extract_service_name(actual_filename)
                 group_key = f"CLUSTER_SERVICE_{service_name}"
                 service_type = "CLUSTER_SERVICE"
                 role_name = None
@@ -383,7 +525,7 @@ class ConfigComparator:
                     'service_name': service_name,
                     'role_name': role_name,
                     'properties': [],
-                    'api_endpoint': self.extract_api_endpoint(put_command)
+                    'api_endpoint': str(source_file)
                 }
             
             grouped_diffs[group_key]['properties'].append({
@@ -419,7 +561,7 @@ class ConfigComparator:
                 'property_count': len(group_data['properties']),
                 'properties': '; '.join([f"{p['name']}={p['value']}" for p in group_data['properties']]),
                 'consolidated_put_command': consolidated_command,
-                'json_payload': json.dumps({"items": items}, indent=2)
+                'json_payload': json.dumps({"items": items})
             })
         
         return consolidated_calls
