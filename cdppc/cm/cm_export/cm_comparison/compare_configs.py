@@ -63,11 +63,15 @@ class ConfigComparator:
         self.discovered_services = set()
         self.discovered_roles = set()
         self.discovered_mgmt_roles = set()
+        self.api_version = "v53"  # Default fallback
         self._discover_services_and_roles()
     
     def _discover_services_and_roles(self):
         """Discover services and roles from the actual exported data."""
         print("Discovering services and roles from exported data...")
+        
+        # Discover API version first
+        self._discover_api_version()
         
         # Discover from API control files if available
         self._discover_from_api_control_files()
@@ -75,9 +79,30 @@ class ConfigComparator:
         # Discover from configuration files
         self._discover_from_config_files()
         
+        print(f"Discovered API version: {self.api_version}")
         print(f"Discovered {len(self.discovered_services)} services: {sorted(self.discovered_services)}")
         print(f"Discovered {len(self.discovered_roles)} roles: {sorted(self.discovered_roles)}")
         print(f"Discovered {len(self.discovered_mgmt_roles)} MGMT roles: {sorted(self.discovered_mgmt_roles)}")
+    
+    def _discover_api_version(self):
+        """Discover API version from exported data."""
+        # Look for API control files in source directory
+        api_control_dir = self.source_dir / "api_control_files"
+        if api_control_dir.exists():
+            # Check any CSV file for API version pattern
+            for csv_file in api_control_dir.rglob("*.csv"):
+                try:
+                    with open(csv_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # Look for API version pattern like /api/v53/
+                        import re
+                        match = re.search(r'/api/v(\d+)/', content)
+                        if match:
+                            self.api_version = f"v{match.group(1)}"
+                            print(f"Found API version: {self.api_version}")
+                            return
+                except Exception as e:
+                    continue
     
     def _discover_from_api_control_files(self):
         """Discover services and roles from API control files."""
@@ -369,22 +394,22 @@ class ConfigComparator:
                 # Cluster role config group
                 service_name = self.extract_service_name(actual_filename)
                 role_name = self.extract_role_name(actual_filename)
-                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
+                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
             else:
                 # Cluster service config
                 service_name = self.extract_service_name(actual_filename)
-                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
+                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
         elif 'MGMT_Services' in file_path_str:
             if 'roleConfigGroups' in file_path_str:
                 # MGMT role config group
                 role_group = self.extract_mgmt_role_group(actual_filename)
-                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/cm/service/roleConfigGroups/{role_group}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
+                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/cm/service/roleConfigGroups/{role_group}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
             else:
                 # MGMT service config
-                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/cm/service/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
+                return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/cm/service/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
         else:
             # Fallback generic PUT command
-            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/config" -H "content-type:application/json" -d \'{{"items":[{{"name":"{property_name}","value":"{property_value}"}}]}}\''
     
     def extract_service_name(self, filename: str) -> str:
         """Extract service name from filename using discovered services."""
@@ -580,13 +605,13 @@ class ConfigComparator:
         
         # Use the existing API endpoint structure but with consolidated payload
         if service_type == "MGMT_ROLE":
-            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/cm/service/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/cm/service/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
         elif service_type == "CLUSTER_ROLE":
-            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/roleConfigGroups/{role_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
         elif service_type == "CLUSTER_SERVICE":
-            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/clusters/${{CM_CLUSTER_NAME}}/services/{service_name}/config" -H "content-type:application/json" -d \'{json_payload}\''
         else:
-            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/v53/config" -H "content-type:application/json" -d \'{json_payload}\''
+            return f'curl -s -L -k -u "${{WORKLOAD_USER}}:*****" -X PUT "${{CM_SERVER}}/api/${{CM_API_VERSION}}/config" -H "content-type:application/json" -d \'{json_payload}\''
 
     def generate_csv_report(self, differences: List[Dict[str, Any]], output_file: str):
         """Generate a CSV report with the differences and consolidated API calls."""
