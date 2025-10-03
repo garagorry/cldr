@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -288,25 +288,6 @@ def collect_cdp_resources(environment_name: str, profile: str, debug: bool, base
     if all_datahub_instance_rows:
         save_instance_groups_to_csv(base_dir / f"ALL_{environment_name}_datahub_instance_groups.csv", all_datahub_instance_rows)
 
-    # Cloudera AI (ML) Workspaces
-    ml_list_cmd = f"cdp ml list-workspaces --profile {profile} --environment-name {environment_name}"
-    ml_list_json, _ = run_command_json(ml_list_cmd, debug=debug)
-    workspaces = ml_list_json.get("workspaces", []) if ml_list_json else []
-    if workspaces:
-        log(f"🤖 Found {len(workspaces)} ML workspace(s)")
-    for ws in workspaces:
-        ws_name = ws.get("workspaceName") or ws.get("name")
-        if not ws_name:
-            continue
-        ws_dir = base_dir / "ml" / ws_name
-        describe_ws_cmd = f"cdp ml describe-workspace --profile {profile} --environment-name {environment_name} --workspace-name {ws_name}"
-        describe_ws_json, _ = run_command_json(describe_ws_cmd, debug=debug)
-        if not describe_ws_json:
-            continue
-        save_json(describe_ws_json, ws_dir / f"ML_{ws_name}.json")
-        ws_obj = describe_ws_json.get("workspace", describe_ws_json)
-        igs = ws_obj.get("instanceGroups", [])
-        rows.extend(flatten_instance_groups(ws_name, "ML", environment_name, igs))
 
     # Operational Database (OpDB / COD)
     opdb_list_cmd = f"cdp opdb list-databases --profile {profile} --environment-name {environment_name}"
@@ -334,74 +315,8 @@ def collect_cdp_resources(environment_name: str, profile: str, debug: bool, base
             synthetic_igs = [{"name": "cod", "instances": [{"id": iid} for iid in sorted(set(instance_ids))]}]
             rows.extend(flatten_instance_groups(db_name, "OPDB", environment_name, synthetic_igs))
 
-    # Data Engineering (CDE)
-    de_list_cmd = f"cdp de list-workspaces --profile {profile} --environment-name {environment_name}"
-    de_list_json, _ = run_command_json(de_list_cmd, debug=debug)
-    de_workspaces = de_list_json.get("workspaces", []) if de_list_json else []
-    if de_workspaces:
-        log(f"🧱 Found {len(de_workspaces)} DE workspace(s)")
-    for ws in de_workspaces:
-        ws_crn = ws.get("crn") or ws.get("workspaceCrn")
-        ws_name = ws.get("workspaceName") or ws.get("name") or ws_crn
-        if not ws_crn:
-            continue
-        ws_dir = base_dir / "de" / (ws_name or "workspace")
-        save_json(ws, ws_dir / f"DE_{ws_name}_list.json")
-        # List virtual clusters in workspace (best-effort)
-        de_vc_list_cmd = f"cdp de list-virtual-clusters --profile {profile} --workspace-crn {ws_crn}"
-        de_vc_list_json, _ = run_command_json(de_vc_list_cmd, debug=debug)
-        virtual_clusters = de_vc_list_json.get("virtualClusters", []) if de_vc_list_json else []
-        if virtual_clusters:
-            save_json(de_vc_list_json, ws_dir / f"DE_{ws_name}_virtual_clusters.json")
-        for vc in virtual_clusters:
-            vc_crn = vc.get("crn") or vc.get("clusterCrn")
-            vc_name = vc.get("clusterName") or vc.get("name") or vc_crn
-            if not vc_crn:
-                continue
-            de_vc_desc_cmd = f"cdp de describe-virtual-cluster --profile {profile} --cluster-crn {vc_crn}"
-            de_vc_desc_json, _ = run_command_json(de_vc_desc_cmd, debug=debug)
-            if not de_vc_desc_json:
-                continue
-            vc_dir = ws_dir / (vc_name or "virtual_cluster")
-            save_json(de_vc_desc_json, vc_dir / f"DE_{vc_name}.json")
-            # If the response exposes instanceGroups, flatten (best-effort)
-            igs = (de_vc_desc_json.get("virtualCluster") or {}).get("instanceGroups", [])
-            if igs:
-                rows.extend(flatten_instance_groups(vc_name or ws_name, "DE", environment_name, igs))
 
-    # Data Warehouse (DW) - best-effort discovery
-    # Try common listings to capture topology; store JSON even if we cannot flatten instances
-    dw_base_dir = base_dir / "dw"
-    # Database catalogs
-    dw_list_dbc_cmd = f"cdp dw list-dbc --profile {profile} --environment-name {environment_name}"
-    dw_list_dbc_json, _ = run_command_json(dw_list_dbc_cmd, debug=debug)
-    if dw_list_dbc_json:
-        save_json(dw_list_dbc_json, dw_base_dir / "DW_database_catalogs.json")
-    # Virtual warehouses (naming varies; accommodate common variants)
-    for cmd, out_name in [
-        (f"cdp dw list-vw --profile {profile} --environment-name {environment_name}", "DW_virtual_warehouses.json"),
-        (f"cdp dw list-vws --profile {profile} --environment-name {environment_name}", "DW_virtual_warehouses_alt.json"),
-    ]:
-        dw_list_vw_json, _ = run_command_json(cmd, debug=debug)
-        if dw_list_vw_json:
-            save_json(dw_list_vw_json, dw_base_dir / out_name)
 
-    # DataFlow (CDF PC) - best-effort discovery
-    df_base_dir = base_dir / "dataflow"
-    df_envs_cmd = f"cdp df list-environments --profile {profile}"
-    df_envs_json, _ = run_command_json(df_envs_cmd, debug=debug)
-    if df_envs_json:
-        save_json(df_envs_json, df_base_dir / "DF_environments.json")
-        # Try to list deployments per environment when possible
-        envs = df_envs_json.get("environments", []) if isinstance(df_envs_json, dict) else []
-        for env in envs:
-            env_crn = env.get("crn") or env.get("environmentCrn")
-            if not env_crn:
-                continue
-            df_deploy_cmd = f"cdp df list-deployments --profile {profile} --environment-crn {env_crn}"
-            df_deploy_json, _ = run_command_json(df_deploy_cmd, debug=debug)
-            if df_deploy_json:
-                save_json(df_deploy_json, df_base_dir / f"DF_deployments_{env_crn.replace(':', '_')}.json")
 
     return rows, bundle
 
@@ -550,113 +465,6 @@ def enrich_with_ec2(instance_ids_by_region: Dict[str, List[str]], debug: bool = 
     return all_instance_rows, all_volume_rows
 
 
-def get_cost_explorer_client() -> Any:
-    # Cost Explorer is in us-east-1 for most accounts
-    return boto3.client("ce", region_name="us-east-1")
-
-
-def ce_date(date: datetime) -> str:
-    return date.strftime("%Y-%m-%d")
-
-
-def fetch_costs_for_ec2_and_ebs(
-    ce_client: Any,
-    region: str,
-    start_date: datetime,
-    end_date: datetime,
-    cloudera_resource_name: Optional[str],
-    debug: bool = False,
-) -> Dict[str, Any]:
-    """
-    Query AWS Cost Explorer for EC2 compute and EBS storage costs for a region.
-    Optionally filter by Cloudera-Resource-Name tag if provided.
-    """
-    start = ce_date(start_date)
-    end = ce_date(end_date)
-
-    def build_filter(service: str) -> Dict[str, Any]:
-        flt: Dict[str, Any] = {
-            "And": [
-                {"Dimensions": {"Key": "SERVICE", "Values": [service]}},
-                {"Dimensions": {"Key": "REGION", "Values": [region]}},
-            ]
-        }
-        if cloudera_resource_name:
-            flt["And"].append({"Tags": {"Key": "Cloudera-Resource-Name", "Values": [cloudera_resource_name]}})
-        return flt
-
-    results: Dict[str, Any] = {"ec2_daily": [], "ebs_daily": []}
-
-    for service, key in [
-        ("Amazon Elastic Compute Cloud - Compute", "ec2_daily"),
-        ("Amazon Elastic Block Store", "ebs_daily"),
-    ]:
-        try:
-            if debug:
-                log(f"DEBUG: Querying CE for {service} in {region} [{start}..{end}] tag={cloudera_resource_name or 'NONE'}")
-            resp = ce_client.get_cost_and_usage(
-                TimePeriod={"Start": start, "End": end},
-                Granularity="DAILY",
-                Metrics=["UnblendedCost", "BlendedCost", "AmortizedCost", "UsageQuantity"],
-                GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
-                Filter=build_filter(service),
-            )
-            results[key] = resp.get("ResultsByTime", [])
-        except Exception as e:
-            log(f"⚠️ CE query failed for {service} in {region}: {e}")
-            results[key] = []
-
-    return results
-
-
-def summarize_daily_costs(daily: List[Dict[str, Any]]) -> Tuple[float, List[Dict[str, Any]]]:
-    total = 0.0
-    rows: List[Dict[str, Any]] = []
-    for day in daily:
-        date_str = day.get("TimePeriod", {}).get("Start")
-        day_total = 0.0
-        for grp in day.get("Groups", []):
-            amt = float(grp.get("Metrics", {}).get("UnblendedCost", {}).get("Amount", 0) or 0)
-            day_total += amt
-        total += day_total
-        rows.append({"date": date_str, "unblended": round(day_total, 6)})
-    return total, rows
-
-
-def fetch_costs_for_rds(
-    ce_client: Any,
-    region: str,
-    start_date: datetime,
-    end_date: datetime,
-    cloudera_resource_name: Optional[str],
-    debug: bool = False,
-) -> Dict[str, Any]:
-    start = ce_date(start_date)
-    end = ce_date(end_date)
-
-    flt: Dict[str, Any] = {
-        "And": [
-            {"Dimensions": {"Key": "SERVICE", "Values": ["Amazon Relational Database Service"]}},
-            {"Dimensions": {"Key": "REGION", "Values": [region]}},
-        ]
-    }
-    if cloudera_resource_name:
-        flt["And"].append({"Tags": {"Key": "Cloudera-Resource-Name", "Values": [cloudera_resource_name]}})
-
-    try:
-        if debug:
-            log(f"DEBUG: Querying CE for RDS in {region} [{start}..{end}] tag={cloudera_resource_name or 'NONE'}")
-        resp = ce_client.get_cost_and_usage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="DAILY",
-            Metrics=["UnblendedCost", "BlendedCost", "AmortizedCost", "UsageQuantity"],
-            GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
-            Filter=flt,
-        )
-        return {"rds_daily": resp.get("ResultsByTime", [])}
-    except Exception as e:
-        log(f"⚠️ CE query failed for RDS in {region}: {e}")
-        return {"rds_daily": []}
 
 
 def deep_find_values(obj: Any, keys: List[str]) -> List[Any]:
@@ -675,20 +483,14 @@ def deep_find_values(obj: Any, keys: List[str]) -> List[Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Discover all CDP environment resources (DataHub, Datalake, FreeIPA), "
-            "enrich with AWS EC2/EBS metadata, and fetch EC2/EBS costs via Cost Explorer."
+            "Discover all CDP environment resources (DataHub, Datalake, FreeIPA) "
+            "and enrich with AWS EC2/EBS/RDS metadata."
         )
     )
     parser.add_argument("--environment-name", required=True, help="CDP environment name")
     parser.add_argument("--profile", default="default", help="CDP CLI profile (default: default)")
     parser.add_argument("--output-dir", help="Output directory (default: /tmp/cldr_discovery-<ts>)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument(
-        "--cost-days",
-        type=int,
-        default=30,
-        help="Number of days back for Cost Explorer window (default: 30)",
-    )
     args = parser.parse_args()
 
     profiles = get_cdp_profiles()
@@ -851,107 +653,6 @@ def main() -> None:
     # Enrich with RDS
     rds_rows = enrich_with_rds(rds_ids_by_region, debug=args.debug)
     write_csv(base_dir / "aws" / "rds_instances.csv", rds_rows)
-
-    # Cost Explorer per region and (if possible) per Cloudera-Resource-Name tag
-    ce = get_cost_explorer_client()
-    end_date = datetime.now(timezone.utc).date()
-    start_date = end_date - timedelta(days=max(args.cost_days, 1))
-    end_dt = datetime(end_date.year, end_date.month, end_date.day)
-    start_dt = datetime(start_date.year, start_date.month, start_date.day)
-
-    # Determine unique regions and tags from EC2 and RDS rows
-    crn_tags_by_region: Dict[str, List[Optional[str]]] = defaultdict(list)
-    for row in ec2_rows:
-        crn_tag = row.get("clouderaResourceName")
-        region = row.get("region")
-        if region:
-            # Deduplicate later
-            crn_tags_by_region[region].append(crn_tag)
-    
-    # Also collect tags from RDS rows
-    for row in rds_rows:
-        crn_tag = row.get("clouderaResourceName")
-        region = row.get("region")
-        if region:
-            crn_tags_by_region[region].append(crn_tag)
-
-    # Also include RDS identifiers and regions if present from datalake DB servers and any discovered JSON
-    rds_regions: Dict[str, List[Optional[str]]] = defaultdict(list)
-    # Try infer region(s) from datalake describe content
-    for dl_json in (bundle.get("datalakes") or []):
-        dl_obj = dl_json.get("datalake", dl_json.get("datalakeDetails", dl_json))
-        reg = get_region_from_data(dl_obj)
-        if reg:
-            rds_regions[reg].append(None)
-    # Prefer explicit DB server describe output
-    for dl_name, db_json in (bundle.get("datalake_db_servers") or {}).items():
-        # best-effort: look for region, arn, or endpoint fields
-        values = deep_find_values(db_json, ["region", "awsRegion", "endpoint", "rdsInstanceId", "dbInstanceIdentifier"])
-        reg = None
-        for v in values:
-            if isinstance(v, str) and v.startswith("us-"):
-                reg = v
-                break
-        if not reg:
-            # fallback: use datalake region discovered above
-            for dl_json in (bundle.get("datalakes") or []):
-                if (dl_json.get("datalake", {}).get("datalakeName") or dl_json.get("datalakeDetails", {}).get("datalakeName")) == dl_name:
-                    reg = get_region_from_data(dl_json.get("datalake", dl_json.get("datalakeDetails", dl_json)))
-                    break
-        if reg:
-            rds_regions[reg].append(None)
-
-    # Execute CE queries and write results
-    cost_summary_rows: List[Dict[str, Any]] = []
-    for region, tags in crn_tags_by_region.items():
-        unique_tags = list({t for t in tags if t}) or [None]
-        for tag in unique_tags:
-            ce_results = fetch_costs_for_ec2_and_ebs(ce, region, start_dt, end_dt, tag, debug=args.debug)
-            ec2_total, ec2_daily_rows = summarize_daily_costs(ce_results.get("ec2_daily", []))
-            ebs_total, ebs_daily_rows = summarize_daily_costs(ce_results.get("ebs_daily", []))
-
-            tag_suffix = tag or "UNSCOPED"
-            write_csv(base_dir / "costs" / region / f"ec2_daily_{tag_suffix}.csv", ec2_daily_rows)
-            write_csv(base_dir / "costs" / region / f"ebs_daily_{tag_suffix}.csv", ebs_daily_rows)
-
-            cost_summary_rows.append({
-                "region": region,
-                "tag_ClouderaResourceName": tag or "",
-                "ec2_unblended_total": round(ec2_total, 6),
-                "ebs_unblended_total": round(ebs_total, 6),
-                "rds_unblended_total": 0.0,  # Will be updated below
-                "window_start": ce_date(start_dt),
-                "window_end": ce_date(end_dt),
-            })
-
-    # RDS cost queries per region (integrate with existing cost summary)
-    for region, tags in crn_tags_by_region.items():
-        unique_tags = list({t for t in tags if t}) or [None]
-        for tag in unique_tags:
-            rds_results = fetch_costs_for_rds(ce, region, start_dt, end_dt, tag, debug=args.debug)
-            rds_total, rds_daily_rows = summarize_daily_costs(rds_results.get("rds_daily", []))
-            tag_suffix = tag or "UNSCOPED"
-            write_csv(base_dir / "costs" / region / f"rds_daily_{tag_suffix}.csv", rds_daily_rows)
-            
-            # Update existing cost summary row with RDS costs
-            for summary_row in cost_summary_rows:
-                if (summary_row["region"] == region and 
-                    summary_row["tag_ClouderaResourceName"] == (tag or "")):
-                    summary_row["rds_unblended_total"] = round(rds_total, 6)
-                    break
-            else:
-                # If no existing row found, create new one
-                cost_summary_rows.append({
-                    "region": region,
-                    "tag_ClouderaResourceName": tag or "",
-                    "ec2_unblended_total": 0.0,
-                    "ebs_unblended_total": 0.0,
-                    "rds_unblended_total": round(rds_total, 6),
-                    "window_start": ce_date(start_dt),
-                    "window_end": ce_date(end_dt),
-                })
-
-    write_csv(base_dir / "costs" / "summary.csv", cost_summary_rows)
 
     # Archive output
     archive_path = f"{base_dir}.tar.gz"
