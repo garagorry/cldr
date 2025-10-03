@@ -332,70 +332,75 @@ class ConfigComparator:
     def normalize_filename(self, filename: str) -> str:
         """
         Normalize filename to create a matching key between source and target.
+        This method extracts the service/role part while ignoring cluster-specific prefixes.
         
         Examples:
-        - 'jdga-saf02-aw-dl-gateway1.jdga-saf.a465-9q4k.cloudera.site_jdga-saf02-aw-dl_all_services_config_20250822152126.json'
-          -> 'all_services_config'
-        - 'jdga-saf02-aw-dl-gateway1.jdga-saf.a465-9q4k.cloudera.site_jdga-saf02-aw-dl_atlas_atlas-ATLAS_SERVER-BASE_config.json'
-          -> 'atlas_atlas-ATLAS_SERVER-BASE_config'
+        - 'jdga-it1-aw-dl-gateway0.jdga-it1.a465-9q4k.cloudera.site_jdga-it1-aw-dl_hive_hive-WEBHCAT-BASE_config.json'
+          -> 'hive_hive-WEBHCAT-BASE_config'
+        - 'jdga-mg1-aw-dl-gateway0.jdga-mg1.a465-9q4k.cloudera.site_jdga-mg1-aw-dl_hive_hive-WEBHCAT-BASE_config.json'
+          -> 'hive_hive-WEBHCAT-BASE_config'
         """
         # Remove file extension
         name_without_ext = filename.replace('.json', '')
         
-        # Split by underscores and look for meaningful parts
+        # Split by underscores
         parts = name_without_ext.split('_')
         
-        # Look for service names or role names using discovered patterns
+        # Skip cluster-specific parts (hostname and cluster name)
+        # Look for the pattern: hostname_cluster_service_role_config
+        # We want to extract: service_role_config (ignoring hostname and cluster)
+        
+        # Find the start of service/role information
+        # Typically after the cluster name (second part)
+        service_start_index = None
+        
+        for i, part in enumerate(parts):
+            # Skip hostname (first part) and cluster name (second part)
+            if i < 2:
+                continue
+            
+            # Look for service patterns
+            if (part in self.discovered_services or
+                any(service in part for service in self.discovered_services) or
+                part.startswith('MGMT-') or
+                any(role_type in part.upper() for role_type in self.discovered_role_types) or
+                'config' in part):
+                service_start_index = i
+                break
+        
+        # If we found a service start, return from that point
+        if service_start_index is not None:
+            return '_'.join(parts[service_start_index:])
+        
+        # Fallback: try to find meaningful parts by looking for common patterns
+        meaningful_parts = []
+        for part in parts:
+            # Skip cluster-specific patterns
+            if ('.' in part or  # FQDN
+                part.startswith('jdga-') or  # Cluster prefix
+                len(part) <= 3 or  # Too short
+                part.isdigit() or  # Timestamp
+                part in ['config', 'role', 'service', 'settings']):  # Common words
+                continue
+            
+            # Include meaningful parts
+            if (part in self.discovered_services or
+                part in self.discovered_roles or
+                part in self.discovered_mgmt_roles or
+                any(role_type in part.upper() for role_type in self.discovered_role_types) or
+                '-' in part):  # Role-like patterns
+                meaningful_parts.append(part)
+        
+        if meaningful_parts:
+            return '_'.join(meaningful_parts)
+        
+        # Final fallback: return the last few parts
         if len(parts) >= 3:
-            # Try to find service/role patterns using discovered data
-            for i, part in enumerate(parts):
-                # Check if this part matches any discovered service
-                if part in self.discovered_services:
-                    # Found a service name, include it and following parts
-                    if i + 1 < len(parts):
-                        return '_'.join(parts[i:])
-                    else:
-                        return part
-                
-                # Check for multi-part service names
-                if i + 1 < len(parts):
-                    combined = f"{part}_{parts[i+1]}"
-                    if combined in self.discovered_services:
-                        return combined
-                
-                # Check for services with suffixes
-                if '-' in part and not part.isupper():
-                    base_service = part.split('-')[0]
-                    if base_service in self.discovered_services:
-                        return part
-                
-                # Check for MGMT role groups
-                if part.startswith('MGMT-'):
-                    return part
-                
-                # Check for discovered roles
-                if part in self.discovered_roles or part in self.discovered_mgmt_roles:
-                    return part
-                
-                # Check for role patterns using discovered role types
-                if '-' in part and any(role_type in part.upper() for role_type in self.discovered_role_types):
-                    return part
-                
-                # Check for config keyword
-                if 'config' in part:
-                    # Found config keyword, include previous parts
-                    if i > 0:
-                        return '_'.join(parts[i-1:])
-                    else:
-                        return part
-        
-        # Fallback: return the last meaningful part
-        if len(parts) >= 2:
+            return '_'.join(parts[-3:])
+        elif len(parts) >= 2:
             return '_'.join(parts[-2:])
-        elif len(parts) == 1:
-            return parts[0]
-        
-        return filename  # Return original if no pattern found
+        else:
+            return parts[0] if parts else filename
     
     def compare_configs(self) -> List[Dict[str, Any]]:
         """Compare configurations between source and target directories."""

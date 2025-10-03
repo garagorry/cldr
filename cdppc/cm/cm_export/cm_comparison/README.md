@@ -55,6 +55,8 @@ The `compare_configs.py` script **must** be used with directories created by `cm
 - **Automatic PUT command generation**: Creates ready-to-use curl commands for each difference
 - **Comprehensive comparison**: Handles both Cluster Services and MGMT Services
 - **CSV output**: Generates detailed reports for analysis and execution
+- **Cross-cluster compatibility**: Works with clusters having different hostnames and cluster names
+- **Intelligent file matching**: Automatically normalizes filenames to match equivalent configurations across clusters
 - **Flexible matching**: Works with the organized directory structure from the main export script
 - **Named arguments**: Clean command-line interface with `--source`, `--target`, and `--output-dir` options
 - **Automatic timestamping**: Creates organized output directories with timestamps
@@ -158,7 +160,7 @@ python3 compare_configs.py --help
 
 ### 1. Directory Structure Analysis
 
-The script **requires** directories with the exact structure created by `cm_export_all_service_configs.sh`:
+The script **requires** directories with the exact structure created by `cm_export_all_service_configs.sh`. It intelligently matches files across clusters with different hostnames and cluster names:
 
 ```
 ServiceConfigs/
@@ -170,7 +172,24 @@ roleConfigGroups/
 └── MGMT_Services/           # MGMT role config groups
 ```
 
-### 2. Property Filtering
+### 2. Intelligent File Matching
+
+The script uses advanced filename normalization to match equivalent configurations across different clusters:
+
+**Example filename matching:**
+
+- **Source**: `jdga-it1-aw-dl-gateway0.jdga-it1.a465-9q4k.cloudera.site_jdga-it1-aw-dl_hive_hive-WEBHCAT-BASE_config.json`
+- **Target**: `jdga-mg1-aw-dl-gateway0.jdga-mg1.a465-9q4k.cloudera.site_jdga-mg1-aw-dl_hive_hive-WEBHCAT-BASE_config.json`
+- **Normalized**: `hive_hive-WEBHCAT-BASE_config` (cluster-agnostic)
+
+The normalization process:
+
+1. **Skips cluster-specific prefixes** (hostname, cluster name)
+2. **Extracts service/role information** from any position in the filename
+3. **Uses fallback logic** to find meaningful parts
+4. **Creates cluster-agnostic keys** for matching
+
+### 3. Property Filtering
 
 The script automatically ignores properties that are expected to change:
 
@@ -188,14 +207,14 @@ The script automatically ignores properties that are expected to change:
 - Properties with `{{CM_AUTO_TLS}}` (auto-generated values)
 - Properties with `timestamp`, `date`, `host`, `fqdn`
 
-### 3. Difference Detection
+### 4. Difference Detection
 
 For each configuration file, the script identifies:
 
 - **Missing properties**: Properties present in source but not in target
 - **Value differences**: Properties with different values between source and target
 
-### 4. PUT Command Generation
+### 5. PUT Command Generation
 
 Based on the file location and type, the script generates appropriate PUT commands:
 
@@ -204,7 +223,7 @@ Based on the file location and type, the script generates appropriate PUT comman
 - **MGMT Services**: `/api/{api_version}}/cm/service/config`
 - **MGMT Roles**: `/api/{api_version}}/cm/service/roleConfigGroups/{group}/config`
 
-### 5. Output Directory Management
+### 6. Output Directory Management
 
 The script automatically creates timestamped output directories:
 
@@ -319,6 +338,10 @@ Results saved to: /tmp/comparison_results_20241201_143022
 
 6. **"Could not discover services"**: The `api_control_files` directory is missing or incomplete. Ensure the export script completed successfully.
 
+7. **"No differences found" with different clusters**: If comparing clusters with different hostnames and getting "No differences found", this was a previous limitation that has been fixed. The script now intelligently matches files across different cluster names and hostnames.
+
+8. **"Files not found in target directory"**: This is normal when comparing clusters with different service configurations. The script will report which files are missing and focus on the ones that exist in both clusters.
+
 ### Debug Mode
 
 For troubleshooting, you can modify the script to print more detailed information by adding debug prints in the comparison methods.
@@ -338,5 +361,15 @@ This tool is **designed specifically** to work with the output from `cm_export_a
 1. **Export** configurations using `cm_export_all_service_configs.sh` from both environments
 2. **Compare** the exported directories using `compare_configs.py`
 3. **Apply** the generated PUT commands to synchronize configurations
+
+### Cross-Cluster Comparison
+
+The tool is designed to work seamlessly across different clusters, even with:
+
+- **Different hostnames**: `cluster1-gateway0.example.com` vs `cluster2-gateway0.example.com`
+- **Different cluster names**: `jdga-it1-aw-dl` vs `jdga-mg1-aw-dl`
+- **Different service configurations**: Some services may exist in one cluster but not the other
+
+The intelligent filename normalization ensures that equivalent configurations are properly matched and compared.
 
 **Note**: This tool cannot be used with manual JSON files or other export methods - it requires the specific format and structure created by the export script.
