@@ -2,8 +2,9 @@
 """
 AWS IAM Policy Downloader
 
-Downloads all attached managed and inline IAM policies for a specified AWS role.
-Saves policies as JSON files in an output directory with optional .tgz bundling.
+Downloads all attached managed and inline IAM policies, plus trust relationships,
+for a specified AWS role. Saves policies as JSON files in an output directory 
+with optional .tgz bundling.
 
 Usage:
     python aws_get_xa_attached_policies.py --role-name <role_name> [--output <output_dir>]
@@ -143,6 +144,121 @@ def download_inline_policies(iam, role_name, output_dir):
         except ClientError as e:
             logging.error(f"Error downloading inline policy {inline_name}: {e}")
 
+def download_trust_policy(iam, role_name, output_dir):
+    """
+    Download the trust relationship (AssumeRolePolicyDocument) for the given role.
+    This contains information about trusted entities and conditions under which
+    they can assume this role.
+    
+    Args:
+        iam: boto3 IAM client
+        role_name (str): Name of the IAM role
+        output_dir (Path): Directory to save trust policy JSON file
+    """
+    logging.info(f"=== Downloading trust relationship for role: {role_name} ===")
+    try:
+        response = iam.get_role(RoleName=role_name)
+        role = response.get('Role', {})
+        trust_policy = role.get('AssumeRolePolicyDocument', {})
+        
+        if trust_policy:
+            # Create a comprehensive trust relationship document
+            trust_info = {
+                "RoleName": role_name,
+                "RoleArn": role.get('Arn', ''),
+                "CreatedDate": role.get('CreateDate', '').isoformat() if hasattr(role.get('CreateDate', ''), 'isoformat') else str(role.get('CreateDate', '')),
+                "Description": role.get('Description', ''),
+                "MaxSessionDuration": role.get('MaxSessionDuration', ''),
+                "AssumeRolePolicyDocument": trust_policy,
+                "TrustedEntities": extract_trusted_entities(trust_policy)
+            }
+            
+            out_path = output_dir / f"{role_name}_trust_relationship.json"
+            with open(out_path, "w") as f:
+                json.dump(trust_info, f, indent=2)
+            logging.info(f"Trust relationship saved as {out_path}")
+            
+            # Log trusted entities for visibility
+            trusted = trust_info['TrustedEntities']
+            if trusted['AWS']:
+                logging.info(f"  Trusted AWS principals: {', '.join(trusted['AWS'])}")
+            if trusted['Service']:
+                logging.info(f"  Trusted services: {', '.join(trusted['Service'])}")
+            if trusted['Federated']:
+                logging.info(f"  Trusted federated identities: {', '.join(trusted['Federated'])}")
+            if trusted['Conditions']:
+                logging.info(f"  Conditions specified: {len(trusted['Conditions'])} statement(s) with conditions")
+        else:
+            logging.warning(f"No trust policy found for role {role_name}")
+            
+    except ClientError as e:
+        logging.error(f"Error downloading trust policy for role {role_name}: {e}")
+
+def extract_trusted_entities(trust_policy):
+    """
+    Extract and categorize trusted entities from the AssumeRolePolicyDocument.
+    
+    Args:
+        trust_policy (dict): The AssumeRolePolicyDocument
+        
+    Returns:
+        dict: Categorized trusted entities and conditions
+    """
+    trusted_entities = {
+        "AWS": [],
+        "Service": [],
+        "Federated": [],
+        "Conditions": []
+    }
+    
+    statements = trust_policy.get('Statement', [])
+    if not isinstance(statements, list):
+        statements = [statements]
+    
+    for statement in statements:
+        if statement.get('Effect') != 'Allow':
+            continue
+            
+        principal = statement.get('Principal', {})
+        
+        # Handle different principal formats
+        if isinstance(principal, str):
+            if principal == '*':
+                trusted_entities['AWS'].append('*')
+        elif isinstance(principal, dict):
+            # AWS principals (accounts, users, roles)
+            aws_principals = principal.get('AWS', [])
+            if isinstance(aws_principals, str):
+                aws_principals = [aws_principals]
+            trusted_entities['AWS'].extend(aws_principals)
+            
+            # Service principals
+            service_principals = principal.get('Service', [])
+            if isinstance(service_principals, str):
+                service_principals = [service_principals]
+            trusted_entities['Service'].extend(service_principals)
+            
+            # Federated principals (SAML, OIDC)
+            federated_principals = principal.get('Federated', [])
+            if isinstance(federated_principals, str):
+                federated_principals = [federated_principals]
+            trusted_entities['Federated'].extend(federated_principals)
+        
+        # Extract conditions if present
+        if 'Condition' in statement:
+            trusted_entities['Conditions'].append({
+                'Statement': statement.get('Sid', 'Unnamed'),
+                'Principal': principal,
+                'Condition': statement['Condition']
+            })
+    
+    # Remove duplicates
+    trusted_entities['AWS'] = list(set(trusted_entities['AWS']))
+    trusted_entities['Service'] = list(set(trusted_entities['Service']))
+    trusted_entities['Federated'] = list(set(trusted_entities['Federated']))
+    
+    return trusted_entities
+
 def create_tgz_bundle(output_dir, bundle_name):
     """
     Create a .tgz archive of the output directory.
@@ -178,6 +294,7 @@ def main():
 
     iam = boto3.client('iam')
 
+    download_trust_policy(iam, args.role_name, output_dir)
     download_attached_managed_policies(iam, args.role_name, output_dir)
     download_inline_policies(iam, args.role_name, output_dir)
 

@@ -1,13 +1,19 @@
 # AWS IAM Policy Downloader
 
-A Python script to download all attached managed and inline IAM policies for a specified AWS role. The script saves each policy as a JSON file and optionally creates a compressed bundle.
+A Python script to download all attached managed and inline IAM policies, plus trust relationships, for a specified AWS role. The script saves each policy as a JSON file and optionally creates a compressed bundle.
 
 ## Features
 
 - Downloads both managed and inline IAM policies
+- **Downloads trust relationships (AssumeRolePolicyDocument)**
+- **Extracts and categorizes trusted entities:**
+  - AWS principals (accounts, users, roles)
+  - Service principals
+  - Federated identities (SAML, OIDC)
+  - Conditions for assuming the role
 - Saves policies as formatted JSON files
 - Automatic timestamp-based directory naming
-- Optional .tgz bundle creation
+- Automatic .tgz bundle creation with timestamp
 - Comprehensive logging to file and console
 - Error handling for AWS API calls
 
@@ -30,7 +36,7 @@ pip install boto3
 
 ### Basic Usage
 
-Download policies for a role to a temporary directory:
+Download policies and trust relationships for a role to a temporary directory:
 
 ```bash
 python aws_get_xa_attached_policies.py --role-name my-iam-role
@@ -38,18 +44,20 @@ python aws_get_xa_attached_policies.py --role-name my-iam-role
 
 ### Specify Output Directory
 
-Download policies to a specific directory with automatic bundling:
+Download policies and trust relationships to a specific directory:
 
 ```bash
 python aws_get_xa_attached_policies.py --role-name my-iam-role --output /path/to/output
 ```
 
+A `.tgz` bundle is automatically created with all downloaded files.
+
 ## Arguments
 
-| Argument      | Required | Description                                                     |
-| ------------- | -------- | --------------------------------------------------------------- |
-| `--role-name` | Yes      | Name of the IAM role to download policies from                  |
-| `--output`    | No       | Output directory for policy files (creates bundle if specified) |
+| Argument      | Required | Description                                                    |
+| ------------- | -------- | -------------------------------------------------------------- |
+| `--role-name` | Yes      | Name of the IAM role to download policies from                 |
+| `--output`    | No       | Output directory for policy files (always creates .tgz bundle) |
 
 ## Output Structure
 
@@ -58,6 +66,7 @@ python aws_get_xa_attached_policies.py --role-name my-iam-role --output /path/to
 ```
 /tmp/role-name_20231201_143022/
 ├── execution.log
+├── role-name_trust_relationship.json
 ├── PolicyName1.json
 ├── PolicyName2.json
 └── role-name_inline-policy-name_inline.json
@@ -69,18 +78,50 @@ python aws_get_xa_attached_policies.py --role-name my-iam-role --output /path/to
 /path/to/output/
 ├── output_role-name_20231201_143022/
 │   ├── execution.log
+│   ├── role-name_trust_relationship.json
 │   ├── PolicyName1.json
 │   ├── PolicyName2.json
 │   └── role-name_inline-policy-name_inline.json
-└── output_role-name_20231201_143022.tgz
+└── role-name_20231201_143022.tgz
 ```
 
 ## File Naming Convention
 
+- **Trust relationship**: `<RoleName>_trust_relationship.json`
 - **Managed policies**: `<PolicyName>.json`
 - **Inline policies**: `<RoleName>_<PolicyName>_inline.json`
 - **Log file**: `execution.log`
-- **Bundle**: `<output_dir>_<role_name>_<timestamp>.tgz`
+- **Bundle**: `<role_name>_<timestamp>.tgz`
+
+## Trust Relationship File Contents
+
+The `<RoleName>_trust_relationship.json` file contains comprehensive information about who can assume the role and under what conditions:
+
+```json
+{
+  "RoleName": "example-role",
+  "RoleArn": "arn:aws:iam::123456789012:role/example-role",
+  "CreatedDate": "2023-12-01T14:30:22",
+  "Description": "Role description",
+  "MaxSessionDuration": 3600,
+  "AssumeRolePolicyDocument": {
+    "Version": "2012-10-17",
+    "Statement": [...]
+  },
+  "TrustedEntities": {
+    "AWS": ["arn:aws:iam::987654321098:root"],
+    "Service": ["ec2.amazonaws.com", "lambda.amazonaws.com"],
+    "Federated": ["arn:aws:iam::123456789012:saml-provider/ExampleProvider"],
+    "Conditions": [
+      {
+        "Statement": "StatementId",
+        "Principal": {...},
+        "Condition": {...}
+      }
+    ]
+  }
+}
+```
 
 ## Examples
 
@@ -146,6 +187,7 @@ The script requires the following IAM permissions:
     {
       "Effect": "Allow",
       "Action": [
+        "iam:GetRole",
         "iam:ListAttachedRolePolicies",
         "iam:ListRolePolicies",
         "iam:GetPolicy",
@@ -157,6 +199,8 @@ The script requires the following IAM permissions:
   ]
 }
 ```
+
+**Note**: `iam:GetRole` is required to retrieve the trust relationship (AssumeRolePolicyDocument) and role metadata.
 
 ## Troubleshooting
 
