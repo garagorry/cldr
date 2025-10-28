@@ -1,0 +1,18 @@
+# CDP Environment Discovery Tool - Requirements
+# 
+# This tool uses only Python standard library modules.
+# The only external requirement is the CDP CLI, which should be installed separately.
+# https://docs.cloudera.com/cdp-public-cloud/cloud/cli/topics/mc-installing-cdp-client.html
+#
+# To install CDP CLI:
+#   pip install cdpcli
+#
+# No additional Python packages are required for this tool to function.
+# However, for development and testing, you may want:
+#
+# Development dependencies (optional):
+# pytest>=7.0.0           # For unit testing
+# black>=22.0.0           # For code formatting
+# flake8>=4.0.0           # For linting
+# mypy>=0.950             # For type checking
+
