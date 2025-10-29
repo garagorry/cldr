@@ -7,8 +7,8 @@
 # with enhanced features including progress tracking, logging, and customization.
 #
 # Author: Jimmy Garagorry
-# Version: 2.0.0
-# Last Updated: 2025-08-14
+# Version: 2.1.0
+# Last Updated: 2025-12-19
 #
 # =============================================================================
 # USAGE
@@ -42,7 +42,7 @@
 
 # Script configuration
 SCRIPT_NAME="run_freeipa_health_check.sh"
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FUNCTIONS_FILE="${SCRIPT_DIR}/freeipa_status_functions.sh"
 LOG_DIR="/var/log/freeipa_health_check"
@@ -110,6 +110,17 @@ ${YELLOW}HEALTH CHECKS AVAILABLE:${NC}
     freeipa_groups_consistency_check   # Group consistency
     freeipa_users_consistency_check    # User consistency
     freeipa_dns_duplicates_check       # DNS duplicates
+    freeipa_cdp_services_check         # CDP services validation (7 services)
+    freeipa_checkports                 # Network ports validation
+    freeipa_health_agent_check         # Health agent API check
+    freeipa_ccm_check                  # CCM availability
+    freeipa_ccm_network_status_check   # Control plane connectivity
+    freeipa_check_saltuser_password_rotation # Saltuser password
+    freeipa_check_nginx                # Nginx configuration
+    freeipa_disk_check                 # Disk usage monitoring
+    freeipa_memory_check               # Memory monitoring
+    freeipa_cpu_check                  # CPU usage monitoring
+    freeipa_internode_connectivity_check # Inter-node port connectivity
 
 ${YELLOW}EXIT CODES:${NC}
     0 - All health checks passed
@@ -175,8 +186,29 @@ function validate_environment() {
         log_message "WARNING" "Consider running with: sudo $0"
     fi
     
-    # Check for required tools
-    local required_tools=("salt" "jq" "ipa" "cipa" "ldapsearch" "host")
+    # Try to activate Salt environment if available
+    local salt_activated=false
+    if ! command -v salt &> /dev/null; then
+        # Salt not in PATH, try to activate it
+        if [[ -f "activate_salt_env" ]]; then
+            source activate_salt_env &> /dev/null && salt_activated=true
+        elif [[ -f "/root/activate_salt_env" ]]; then
+            source /root/activate_salt_env &> /dev/null && salt_activated=true
+        elif [[ -f "/usr/local/bin/activate_salt_env" ]]; then
+            source /usr/local/bin/activate_salt_env &> /dev/null && salt_activated=true
+        fi
+        
+        # Check if Salt is now available
+        if command -v salt &> /dev/null; then
+            log_message "INFO" "Salt environment activated successfully"
+            salt_activated=true
+        fi
+    else
+        salt_activated=true
+    fi
+    
+    # Check for required tools (after trying to activate Salt)
+    local required_tools=("jq" "ipa" "cipa" "ldapsearch" "host")
     local missing_tools=()
     
     for tool in "${required_tools[@]}"; do
@@ -185,14 +217,15 @@ function validate_environment() {
         fi
     done
     
-    if [[ ${#missing_tools[@]} -gt 0 ]]; then
-        log_message "WARNING" "Missing required tools: ${missing_tools[*]}"
-        log_message "WARNING" "Some health checks may fail"
+    # Warn about Salt only if activation failed
+    if [[ "$salt_activated" == false ]]; then
+        log_message "WARNING" "Salt not available. Tried sourcing 'activate_salt_env' from common locations."
+        log_message "WARNING" "Some health checks require Salt. Run: source activate_salt_env"
     fi
     
-    # Check Salt environment
-    if ! command -v salt &> /dev/null; then
-        log_message "WARNING" "Salt not found in PATH. Ensure activate_salt_env is sourced."
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        log_message "WARNING" "Missing optional tools: ${missing_tools[*]}"
+        log_message "WARNING" "Some health checks may not run"
     fi
     
     return 0
