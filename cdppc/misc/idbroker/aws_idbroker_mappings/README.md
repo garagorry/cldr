@@ -180,6 +180,24 @@ Contains detailed information about the validation process:
 
 ## Console Output Example
 
+### Pre-flight Checks Output
+
+```
+Performing pre-flight checks...
+
+✓ AWS CLI found: aws-cli/2.13.0 Python/3.11.4 Darwin/23.0.0 source/arm64
+✓ AWS credentials valid
+  Account: 123456789012
+  ARN: arn:aws:iam::123456789012:user/john.doe
+  Profile: production
+
+Checking IAM permissions...
+✓ IAM permissions verified (iam:ListRoles)
+✓ Required permission iam:GetRole should also be available
+```
+
+### Validation Output
+
 ```
 Validating 10 mappings...
 Found 5 unique AWS IAM roles to validate
@@ -335,18 +353,90 @@ else
 fi
 ```
 
+## Pre-flight Checks
+
+Before validating roles, the script performs automated pre-flight checks:
+
+1. **AWS CLI Installation** - Verifies AWS CLI is installed and accessible
+2. **AWS Credentials** - Validates credentials are configured and working
+3. **IAM Permissions** - Checks for required IAM permissions
+
+If any check fails, the script will:
+
+- Display a clear error message
+- Show exactly what's needed to fix the issue
+- Exit with a specific code for easy troubleshooting
+
+### Required IAM Permissions
+
+The script requires the following IAM permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:ListRoles"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**Or use AWS managed policy:** `arn:aws:iam::aws:policy/IAMReadOnlyAccess`
+
 ## Exit Codes
 
 - `0`: All mappings are valid
-- `1`: One or more invalid mappings found, or CLI error occurred
+- `1`: One or more invalid mappings found, or general CLI error
+- `2`: AWS CLI not found or not installed
+- `3`: AWS permissions insufficient (missing IAM permissions)
 - `130`: Validation interrupted by user (Ctrl+C)
 
 ## Troubleshooting
 
-### AWS CLI Not Configured
+### AWS CLI Not Found
 
 ```
-Error: AWS CLI command failed: Unable to locate credentials
+❌ AWS CLI Not Found
+
+AWS CLI is not installed or not in PATH.
+Please install AWS CLI:
+  - pip install awscli
+  - Or visit: https://aws.amazon.com/cli/
+```
+
+**Solution:** Install AWS CLI:
+
+```bash
+# Using pip
+pip install awscli
+
+# Or using official installer
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+# Verify installation
+aws --version
+```
+
+### AWS Credentials Not Configured
+
+```
+❌ AWS Permission Error
+
+AWS credentials not configured or invalid.
+Error: Unable to locate credentials
+
+Please configure AWS CLI:
+  aws configure
+
+Or set environment variables:
+  export AWS_ACCESS_KEY_ID=your_key
+  export AWS_SECRET_ACCESS_KEY=your_secret
+  export AWS_DEFAULT_REGION=us-west-2
 ```
 
 **Solution:** Configure AWS CLI with `aws configure` or set environment variables:
@@ -357,25 +447,71 @@ export AWS_SECRET_ACCESS_KEY=your_secret
 export AWS_DEFAULT_REGION=us-west-2
 ```
 
-### Permission Denied
+### Insufficient IAM Permissions
 
 ```
-Error: AWS CLI command failed: AccessDenied
-```
+❌ AWS Permission Error
 
-**Solution:** Ensure your AWS user/role has `iam:GetRole` permission:
+Insufficient IAM permissions.
 
-```json
+This tool requires the following IAM permissions:
+  • iam:GetRole  (required to validate role existence)
+  • iam:ListRoles (optional, for permission verification)
+
+Required IAM Policy:
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": "iam:GetRole",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListRoles"
+      ],
       "Resource": "*"
     }
   ]
 }
+
+Alternatively, you can use the AWS managed policy:
+  • arn:aws:iam::aws:policy/IAMReadOnlyAccess
+
+Error from AWS: User: arn:aws:iam::123456789012:user/john.doe is not
+authorized to perform: iam:ListRoles on resource: *
+```
+
+**Solution:** Attach the required IAM policy to your user/role:
+
+```bash
+# Option 1: Attach AWS managed policy (easiest)
+aws iam attach-user-policy \
+  --user-name your-username \
+  --policy-arn arn:aws:iam::aws:policy/IAMReadOnlyAccess
+
+# Option 2: Create and attach custom policy
+cat > idbroker-validator-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListRoles"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam create-policy \
+  --policy-name IDBrokerValidatorPolicy \
+  --policy-document file://idbroker-validator-policy.json
+
+aws iam attach-user-policy \
+  --user-name your-username \
+  --policy-arn arn:aws:iam::YOUR_ACCOUNT:policy/IDBrokerValidatorPolicy
 ```
 
 ### Invalid JSON Input

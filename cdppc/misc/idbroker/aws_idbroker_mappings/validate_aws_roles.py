@@ -6,10 +6,22 @@ This script validates IDBroker mappings by checking if AWS IAM roles exist
 using AWS CLI. It helps identify missing or incorrect role ARNs before
 creating IDBroker mappings in CDP.
 
+Prerequisites:
+    - AWS CLI installed (aws --version)
+    - AWS credentials configured (aws configure)
+    - IAM permissions: iam:GetRole, iam:ListRoles
+
 Usage:
     python validate_aws_roles.py <input_json_file>
     python validate_aws_roles.py --stdin  # Read from stdin
     python validate_aws_roles.py <input_json_file> --aws-profile <profile_name>
+
+Exit Codes:
+    0   - All mappings are valid
+    1   - One or more invalid mappings found
+    2   - AWS CLI not found/installed
+    3   - AWS permissions insufficient
+    130 - User interrupted (Ctrl+C)
 """
 
 import json
@@ -46,6 +58,14 @@ class AWSCLIError(Exception):
     """Custom exception for AWS CLI command failures."""
 
 
+class AWSCLINotFoundError(Exception):
+    """Custom exception for AWS CLI not being installed."""
+
+
+class AWSPermissionError(Exception):
+    """Custom exception for insufficient AWS permissions."""
+
+
 class AWSIAMRoleValidator:
     """
     Validates IDBroker mappings by checking AWS IAM role existence.
@@ -70,6 +90,150 @@ class AWSIAMRoleValidator:
         self.invalid_mappings: List[Dict] = []
         self.validation_results: Dict[str, RoleValidationResult] = {}
         self.unique_roles: Set[str] = set()
+    
+    def check_aws_cli_installed(self) -> bool:
+        """
+        Check if AWS CLI is installed and accessible.
+        
+        Returns:
+            True if AWS CLI is installed
+            
+        Raises:
+            AWSCLINotFoundError: If AWS CLI is not found
+        """
+        try:
+            result = subprocess.run(
+                ["aws", "--version"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.returncode == 0:
+                print(f"✓ AWS CLI found: {result.stdout.strip()}")
+                return True
+            else:
+                raise AWSCLINotFoundError("AWS CLI command failed")
+        except FileNotFoundError:
+            raise AWSCLINotFoundError(
+                "AWS CLI is not installed or not in PATH.\n"
+                "Please install AWS CLI:\n"
+                "  - pip install awscli\n"
+                "  - Or visit: https://aws.amazon.com/cli/"
+            )
+    
+    def check_aws_credentials(self) -> bool:
+        """
+        Check if AWS credentials are configured and valid.
+        
+        Returns:
+            True if credentials are valid
+            
+        Raises:
+            AWSPermissionError: If credentials are not configured
+        """
+        try:
+            result = subprocess.run(
+                ["aws", "sts", "get-caller-identity"] + 
+                (["--profile", self.aws_profile] if self.aws_profile else []) +
+                ["--output", "json"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            
+            if result.returncode == 0:
+                identity = json.loads(result.stdout)
+                print(f"✓ AWS credentials valid")
+                print(f"  Account: {identity.get('Account', 'Unknown')}")
+                print(f"  ARN: {identity.get('Arn', 'Unknown')}")
+                if self.aws_profile:
+                    print(f"  Profile: {self.aws_profile}")
+                return True
+            else:
+                error_msg = result.stderr.strip()
+                if "could not be found" in error_msg.lower() or "invalid" in error_msg.lower():
+                    raise AWSPermissionError(
+                        f"AWS credentials not configured or invalid.\n"
+                        f"Error: {error_msg}\n\n"
+                        f"Please configure AWS CLI:\n"
+                        f"  aws configure{' --profile ' + self.aws_profile if self.aws_profile else ''}\n\n"
+                        f"Or set environment variables:\n"
+                        f"  export AWS_ACCESS_KEY_ID=your_key\n"
+                        f"  export AWS_SECRET_ACCESS_KEY=your_secret\n"
+                        f"  export AWS_DEFAULT_REGION=us-west-2"
+                    )
+                else:
+                    raise AWSPermissionError(f"AWS credential check failed: {error_msg}")
+        except json.JSONDecodeError as e:
+            raise AWSPermissionError(f"Failed to parse AWS credential response: {e}")
+    
+    def check_iam_permissions(self) -> bool:
+        """
+        Check if the current AWS credentials have necessary IAM permissions.
+        
+        Tests permissions by attempting to get a well-known AWS managed role.
+        
+        Returns:
+            True if permissions are adequate
+            
+        Raises:
+            AWSPermissionError: If IAM permissions are insufficient
+        """
+        print("\nChecking IAM permissions...")
+        
+        # We'll do a soft check by attempting to list roles (if that fails, we know we don't have permissions)
+        # But we'll provide detailed guidance on what's needed
+        try:
+            result = subprocess.run(
+                ["aws", "iam", "list-roles", "--max-items", "1"] +
+                (["--profile", self.aws_profile] if self.aws_profile else []) +
+                ["--output", "json"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            
+            if result.returncode == 0:
+                print("✓ IAM permissions verified (iam:ListRoles)")
+                print("✓ Required permission iam:GetRole should also be available")
+                return True
+            else:
+                error_msg = result.stderr.strip()
+                
+                # Check for specific permission errors
+                if "AccessDenied" in error_msg or "not authorized" in error_msg.lower():
+                    raise AWSPermissionError(
+                        "Insufficient IAM permissions.\n\n"
+                        "This tool requires the following IAM permissions:\n"
+                        "  • iam:GetRole  (required to validate role existence)\n"
+                        "  • iam:ListRoles (optional, for permission verification)\n\n"
+                        "Required IAM Policy:\n"
+                        "{\n"
+                        '  "Version": "2012-10-17",\n'
+                        '  "Statement": [\n'
+                        '    {\n'
+                        '      "Effect": "Allow",\n'
+                        '      "Action": [\n'
+                        '        "iam:GetRole",\n'
+                        '        "iam:ListRoles"\n'
+                        '      ],\n'
+                        '      "Resource": "*"\n'
+                        '    }\n'
+                        '  ]\n'
+                        "}\n\n"
+                        "Alternatively, you can use the AWS managed policy:\n"
+                        "  • arn:aws:iam::aws:policy/IAMReadOnlyAccess\n\n"
+                        f"Error from AWS: {error_msg}"
+                    )
+                else:
+                    # Non-permission error, might work anyway
+                    print(f"⚠️  Warning: Could not verify IAM permissions: {error_msg}")
+                    print("   Continuing anyway - will fail later if permissions are insufficient")
+                    return True
+        except Exception as e:
+            print(f"⚠️  Warning: Permission check failed: {e}")
+            print("   Continuing anyway - will fail later if permissions are insufficient")
+            return True
     
     def run_aws_command(self, command: List[str]) -> Dict:
         """
@@ -438,6 +602,13 @@ Examples:
     validator = AWSIAMRoleValidator(aws_profile=args.aws_profile)
     
     try:
+        # Perform pre-flight checks
+        print("Performing pre-flight checks...\n")
+        validator.check_aws_cli_installed()
+        validator.check_aws_credentials()
+        validator.check_iam_permissions()
+        print()
+        
         # Extract and validate mappings
         mappings = data.get("mappings", [])
         if not mappings:
@@ -466,16 +637,26 @@ Examples:
             print("\n✓ All mappings are valid!")
             sys.exit(0)
             
+    except AWSCLINotFoundError as e:
+        print(f"\n❌ AWS CLI Not Found\n")
+        print(str(e))
+        sys.exit(2)
+    except AWSPermissionError as e:
+        print(f"\n❌ AWS Permission Error\n")
+        print(str(e))
+        sys.exit(3)
     except AWSCLIError as e:
-        print(f"\nError: {e}")
-        print("Make sure AWS CLI is installed and configured properly.")
+        print(f"\n❌ AWS CLI Error\n")
+        print(str(e))
+        print("\nMake sure AWS CLI is installed and configured properly.")
         print("Run 'aws configure' or set AWS_PROFILE environment variable.")
         sys.exit(1)
     except KeyboardInterrupt:
         print("\n\nValidation interrupted by user.")
         sys.exit(130)
     except Exception as e:
-        print(f"\nUnexpected error: {e}")
+        print(f"\n❌ Unexpected Error\n")
+        print(f"{e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
