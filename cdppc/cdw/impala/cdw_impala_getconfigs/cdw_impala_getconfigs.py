@@ -222,8 +222,9 @@ def run_kubectl_command(
     try:
         result = subprocess.run(
             cmd,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=False,
             timeout=60
         )
@@ -276,8 +277,9 @@ def get_node_details(
     try:
         result = subprocess.run(
             cmd,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=False,
             timeout=30
         )
@@ -405,8 +407,9 @@ def collect_cluster_resources(
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 check=False,
                 timeout=60
             )
@@ -494,8 +497,9 @@ def collect_node_information(
     try:
         result = subprocess.run(
             cmd,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=False,
             timeout=60
         )
@@ -589,8 +593,9 @@ def collect_pod_logs(
             try:
                 result = subprocess.run(
                     cmd,
-                    capture_output=True,
-                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
                     check=False,
                     timeout=30
                 )
@@ -647,8 +652,9 @@ def collect_describe_output(
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 check=False,
                 timeout=60
             )
@@ -737,8 +743,9 @@ def run_cdp_command(
     try:
         result = subprocess.run(
             command,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=False,
             timeout=timeout
         )
@@ -813,8 +820,9 @@ def collect_cdp_cdw_information(
     try:
         result = subprocess.run(
             ["cdp", "--version"],
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             timeout=10
         )
         if result.returncode != 0:
@@ -1281,8 +1289,9 @@ Examples:
             test_cmd.extend(["--kubeconfig", kubeconfig])
         result = subprocess.run(
             test_cmd,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             timeout=10
         )
         if result.returncode != 0:
