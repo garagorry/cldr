@@ -21,12 +21,16 @@ This tool validates all mappings against your CDP environment and creates a clea
 - **Detailed Reporting**: Shows which mappings are valid/invalid and why
 - **Flexible Input**: Supports file input or stdin
 - **Error Handling**: Comprehensive error handling and reporting
+- **CDP CRN Parsing**: Extracts entity names and IDs from CDP CRNs
+- **Batch Loading**: Efficiently loads all users and groups upfront
+- **On-Demand Group Members**: Only loads group members for groups in mappings
+- **Memory Efficient**: Uses sets for fast lookups
 
 ## Prerequisites
 
-- Python 3.6 or higher
+- Python 3.9.6 or higher
 - CDP CLI installed and configured
-- `jq` command-line JSON processor
+- `jq` command-line JSON processor (optional, for formatting)
 - Valid CDP credentials with appropriate permissions
 
 ### Required CDP Permissions
@@ -54,7 +58,7 @@ Your CDP user needs the following permissions:
    # On Ubuntu/Debian
    sudo apt-get install jq
 
-   # On RHEL/CentOS
+   # On RHEL
    sudo yum install jq
 
    # Or download from: https://stedolan.github.io/jq/download/
@@ -124,8 +128,9 @@ cdp environments get-id-broker-mappings --environment-name "$ENV_NAME" \
 1. Clone or download the script:
 
    ```bash
-   mkdir -p /tmp/idbroker_mappings
+   mkdir -p ~/idbroker_mappings
    # Copy validates_mappings.py to the directory
+   cd ~/idbroker_mappings
    ```
 
 2. Make executable:
@@ -146,6 +151,16 @@ cat input_mappings.json | python3 validates_mappings.py --stdin
 
 # Specify custom output file
 python3 validates_mappings.py input_mappings.json --output clean_mappings.json
+
+# With timestamped directory structure (auto-detects env_name from input)
+cdp environments get-id-broker-mappings --environment-name "$ENV_NAME" \
+| jq -c --arg env "$ENV_NAME" '{...}' \
+| python3 validates_mappings.py --stdin --output clean_mappings.json
+
+# With explicit environment name and timestamp
+python3 validates_mappings.py input_mappings.json \
+  --env-name "$ENV_NAME" \
+  --output clean_mappings.json
 ```
 
 ### Command Line Options
@@ -190,8 +205,25 @@ python3 validates_mappings.py input_mappings.json --output clean_mappings.json
    # The script creates clean_mappings.json with only valid mappings
    # Use this file for your datalake operations or updates
 
-   # For example, to update IDBroker mappings:
-   # cdp environments set-id-broker-mappings --cli-input-json file:///tmp/clean_${ENV_NAME}_mappings.json
+   # Example: Update IDBroker mappings using the clean mappings file
+   ENV_NAME="jdga-sbx-01-cdp-env"
+   CLEAN_MAPPINGS_FILE="/tmp/clean_${ENV_NAME}_mappings.json"
+
+   # Verify the clean mappings file exists and review its contents
+   cat "$CLEAN_MAPPINGS_FILE" | jq .
+
+   # Apply the clean mappings to the environment
+   # Note: Use 'file://' prefix for local file paths
+   cdp environments set-id-broker-mappings \
+     --cli-input-json "file://${CLEAN_MAPPINGS_FILE}"
+
+   # Alternative: If the file is in the current directory
+   cdp environments set-id-broker-mappings \
+     --cli-input-json "file://$(pwd)/clean_${ENV_NAME}_mappings.json"
+
+   # Example with absolute path
+   cdp environments set-id-broker-mappings \
+     --cli-input-json "file:///home/user/projects/idbroker_mappings/clean_jdga-sbx-01-cdp-env_mappings.json"
    ```
 
 ## Input Format
@@ -256,10 +288,50 @@ INVALID MAPPINGS (will be excluded):
   - jane.doe (crn:altus:iam:us-west-1:account:user:jane.doe/invalid-id)
   - old-group (crn:altus:iam:us-west-1:account:group:old-group/old-id)
 
-Clean mappings saved to: clean_mappings.json
+Clean mappings saved to: jdga-sbx-01-cdp-env_mappings_20231223_152759/clean_jdga-sbx-01-cdp-env_mappings_20231223_152759.json
+Original mappings backup saved to: jdga-sbx-01-cdp-env_mappings_20231223_152759/jdga-sbx-01-cdp-env_mappings_20231223_152759_original.json
+
+======================================================================
+VALIDATION COMPLETE - FILE LOCATIONS
+======================================================================
+Backup directory: ./jdga-sbx-01-cdp-env_mappings_20231223_152759
+Original backup:  ./jdga-sbx-01-cdp-env_mappings_20231223_152759/jdga-sbx-01-cdp-env_mappings_20231223_152759_original.json
+Clean mappings:    ./jdga-sbx-01-cdp-env_mappings_20231223_152759/clean_jdga-sbx-01-cdp-env_mappings_20231223_152759.json
+
+======================================================================
+TO APPLY THE CLEAN MAPPINGS TO YOUR CDP ENVIRONMENT
+======================================================================
+Use the following command:
+
+cdp environments set-id-broker-mappings \
+  --cli-input-json "file:///path/to/jdga-sbx-01-cdp-env_mappings_20231223_152759/clean_jdga-sbx-01-cdp-env_mappings_20231223_152759.json"
+
+# Or with environment name variable:
+ENV_NAME="jdga-sbx-01-cdp-env"
+CLEAN_FILE="/path/to/jdga-sbx-01-cdp-env_mappings_20231223_152759/clean_jdga-sbx-01-cdp-env_mappings_20231223_152759.json"
+cdp environments set-id-broker-mappings \
+  --cli-input-json "file://${CLEAN_FILE}"
+
+======================================================================
 ```
 
-### Output File
+### Output File Structure
+
+When the script detects an environment name (from input data or `--env-name` option), it automatically creates a timestamped directory structure:
+
+```
+${ENV_NAME}_mappings_${TIMESTAMP}/
+├── ${ENV_NAME}_mappings_${TIMESTAMP}_original.json  (backup of original)
+└── clean_${ENV_NAME}_mappings_${TIMESTAMP}.json      (clean validated mappings)
+```
+
+**Example:**
+
+```
+jdga-sbx-01-cdp-env_mappings_20231223_152759/
+├── jdga-sbx-01-cdp-env_mappings_20231223_152759_original.json
+└── clean_jdga-sbx-01-cdp-env_mappings_20231223_152759.json
+```
 
 The script generates a clean JSON file containing only valid mappings:
 
@@ -279,11 +351,237 @@ The script generates a clean JSON file containing only valid mappings:
 }
 ```
 
+## Applying Clean Mappings to CDP Environment
+
+After validation, you can apply the clean mappings to your CDP environment using the `cdp environments set-id-broker-mappings` command.
+
+### Basic Usage
+
+```bash
+# Apply clean mappings using the --cli-input-json option
+# Note: Use 'file://' prefix for local file paths
+
+cdp environments set-id-broker-mappings \
+  --cli-input-json "file://clean_mappings.json"
+```
+
+### Examples with Different File Paths
+
+```bash
+# Example 1: File in current directory
+cdp environments set-id-broker-mappings \
+  --cli-input-json "file://$(pwd)/clean_jdga-sbx-01-cdp-env_mappings.json"
+
+# Example 2: File with absolute path
+cdp environments set-id-broker-mappings \
+  --cli-input-json "file:///tmp/clean_jdga-sbx-01-cdp-env_mappings.json"
+
+# Example 3: File with relative path
+cdp environments set-id-broker-mappings \
+  --cli-input-json "file://./clean_jdga-sbx-01-cdp-env_mappings.json"
+
+# Example 4: Using environment variable
+ENV_NAME="jdga-sbx-01-cdp-env"
+CLEAN_FILE="/tmp/clean_${ENV_NAME}_mappings.json"
+cdp environments set-id-broker-mappings \
+  --cli-input-json "file://${CLEAN_FILE}"
+```
+
+### Complete Workflow Example
+
+```bash
+#!/bin/bash
+# Complete workflow: Extract, validate, and apply mappings
+
+ENV_NAME="jdga-sbx-01-cdp-env"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="/tmp"
+CLEAN_FILE="${BACKUP_DIR}/clean_${ENV_NAME}_mappings_${TIMESTAMP}.json"
+
+# Step 1: Extract current mappings
+echo "Extracting current IDBroker mappings..."
+cdp environments get-id-broker-mappings --environment-name "$ENV_NAME" \
+| jq -c --arg env "$ENV_NAME" '{
+    environmentName: $env,
+    dataAccessRole: .dataAccessRole,
+    rangerAuditRole: .rangerAuditRole,
+    baselineRole: .baselineRole,
+    mappings: (.mappings // []),
+    setEmptyMappings: false
+  } + (if .rangerCloudAccessAuthorizerRole then
+        {rangerCloudAccessAuthorizerRole: .rangerCloudAccessAuthorizerRole}
+      else {} end)' | jq . > "${BACKUP_DIR}/${ENV_NAME}_mappings_${TIMESTAMP}.json"
+
+# Step 2: Validate mappings
+echo "Validating mappings..."
+python3 validates_mappings.py "${BACKUP_DIR}/${ENV_NAME}_mappings_${TIMESTAMP}.json" \
+  --output "$CLEAN_FILE"
+
+# Step 3: Check validation result and apply if successful
+if [ $? -eq 0 ]; then
+    echo "✓ All mappings validated successfully"
+    echo "Clean mappings saved to: $CLEAN_FILE"
+
+    # Review the clean mappings before applying
+    echo ""
+    echo "Reviewing clean mappings:"
+    cat "$CLEAN_FILE" | jq .
+
+    # Prompt for confirmation (optional)
+    read -p "Apply these mappings to environment '$ENV_NAME'? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Applying clean mappings to environment: $ENV_NAME"
+        cdp environments set-id-broker-mappings \
+          --cli-input-json "file://${CLEAN_FILE}"
+
+        if [ $? -eq 0 ]; then
+            echo "✓ IDBroker mappings successfully updated"
+        else
+            echo "✗ Failed to update IDBroker mappings"
+            exit 1
+        fi
+    else
+        echo "Mappings not applied. Clean file saved at: $CLEAN_FILE"
+    fi
+else
+    echo "✗ Validation failed - mappings contain invalid entries"
+    echo "Review the validation output above and fix invalid mappings"
+    exit 1
+fi
+```
+
+### Important Notes
+
+- **File Path Format**: Always use the `file://` prefix when specifying local file paths
+- **Absolute vs Relative Paths**: Both work, but absolute paths are more reliable
+- **File Permissions**: Ensure the file is readable by the user running the CDP CLI command
+- **Backup**: The script automatically creates a backup of the original mappings (see `*_original.json` files)
+- **Review Before Applying**: Always review the clean mappings file before applying to production environments
+
+## API Documentation
+
+### Classes
+
+#### `IDBrokerMappingValidator`
+
+Main validator class that provides functionality to validate IDBroker mappings by checking user/group existence in CDP.
+
+**Initialization:**
+
+```python
+validator = IDBrokerMappingValidator()
+```
+
+**Methods:**
+
+- **`run_cdp_command(command: List[str]) -> Dict`**
+
+  - Executes a CDP CLI command and returns parsed JSON output
+  - Raises `CDPCLIError` if command fails or output cannot be parsed
+
+- **`load_existing_users() -> None`**
+
+  - Loads all existing users from CDP and stores their CRNs
+  - Uses `cdp iam list-users` command with `--max-items 10000`
+  - Prints warning if users cannot be loaded
+
+- **`load_existing_groups() -> None`**
+
+  - Loads all existing groups from CDP and stores their CRNs
+  - Uses `cdp iam list-groups` command with `--max-items 10000`
+  - Prints warning if groups cannot be loaded
+
+- **`load_group_members(group_crns: Set[str]) -> None`**
+
+  - Loads members for specific groups using CDP CLI
+  - Uses `cdp iam list-group-members` for each group
+  - Only loads members for groups that appear in mappings
+
+- **`extract_entity_name_from_crn(crn: str) -> Optional[str]`**
+
+  - Extracts entity name from a CDP CRN
+  - Supports both user and group CRNs
+  - Returns entity name if found, None otherwise
+
+- **`parse_mapping(mapping: Dict) -> MappingInfo`**
+
+  - Parses a mapping entry and extracts structured information
+  - Determines if mapping is for a user or group
+  - Extracts entity name and entity ID from CRN
+  - Returns `MappingInfo` object with parsed data
+
+- **`validate_user_mapping(mapping_info: MappingInfo) -> bool`**
+
+  - Validates if a user mapping exists in CDP
+  - Returns True if user CRN exists in loaded users, False otherwise
+
+- **`validate_group_mapping(mapping_info: MappingInfo) -> bool`**
+
+  - Validates if a group mapping exists and has members
+  - Returns True if group exists in CDP or has loaded members, False otherwise
+
+- **`validate_mappings(mappings: List[Dict]) -> None`**
+
+  - Validates all mappings and categorizes them as valid or invalid
+  - Automatically loads group members for groups in mappings
+  - Updates `validated_mappings` and `invalid_mappings` lists
+  - Prints validation results to console
+
+- **`create_clean_mapping_list(original_data: Dict) -> Dict`**
+
+  - Creates a new mapping list containing only valid mappings
+  - Preserves original data structure
+  - Sets `setEmptyMappings` flag based on validated mappings count
+  - Returns clean data structure ready for use
+
+- **`print_summary() -> None`**
+
+  - Prints detailed validation summary to console
+  - Shows total, valid, and invalid mappings count
+  - Lists all invalid mappings with entity names and CRNs
+
+- **`save_clean_mappings(output_file: str, clean_data: Dict) -> None`**
+
+  - Saves the clean mapping data to a JSON file
+  - Formats JSON with 2-space indentation
+
+#### Data Classes
+
+**`MappingInfo`**
+
+- `accessor_crn: str` - CDP accessor CRN
+- `role: str` - AWS IAM role ARN
+- `is_user: bool` - Whether the mapping is for a user
+- `is_group: bool` - Whether the mapping is for a group
+- `entity_id: str` - Extracted entity ID from CRN
+- `entity_name: str` - Extracted entity name from CRN
+
+#### Exceptions
+
+- **`CDPCLIError`** - Custom exception for CDP CLI command failures
+
 ## Exit Codes
 
 - `0`: All mappings are valid
-- `1`: Some mappings are invalid (check output for details)
-- `2`: Script error (invalid input, CDP CLI issues, etc.)
+- `1`: One or more invalid mappings found, or general error (CDP CLI issues, invalid input, etc.)
+
+## Comparison with validate_aws_roles.py
+
+| Feature        | validates_mappings.py           | validate_aws_roles.py                    |
+| -------------- | ------------------------------- | ---------------------------------------- |
+| **Validates**  | CDP Users/Groups                | AWS IAM Roles                            |
+| **Uses**       | CDP CLI                         | AWS CLI                                  |
+| **Checks**     | User/Group existence in CDP     | Role existence in AWS                    |
+| **Purpose**    | Pre-validate CDP identities     | Pre-validate AWS infrastructure          |
+| **Output**     | Missing users/groups report     | Missing roles report                     |
+| **Pre-flight** | None (relies on CDP CLI errors) | AWS CLI, credentials, permissions checks |
+
+**When to use each:**
+
+- Use `validates_mappings.py` when you want to ensure users/groups exist in CDP before creating mappings
+- Use `validate_aws_roles.py` when you want to ensure AWS IAM roles exist before creating mappings
+- Use both for comprehensive validation of your IDBroker configuration
 
 ## How It Works
 
@@ -291,24 +589,25 @@ The script generates a clean JSON file containing only valid mappings:
 
 1. **Load CDP Data**:
 
-   - Fetches all users using `cdp iam list-users`
-   - Fetches all groups using `cdp iam list-groups`
-   - Loads group members using `cdp iam list-group-members`
+   - Fetches all users using `cdp iam list-users --max-items 10000`
+   - Fetches all groups using `cdp iam list-groups --max-items 10000`
+   - Loads group members on-demand using `cdp iam list-group-members` for groups in mappings
 
 2. **Parse Mappings**:
 
-   - Extracts entity information from CRNs
-   - Determines if each mapping is a user or group
-   - Identifies entity names and IDs
+   - Extracts entity information from CRNs using regex pattern matching
+   - Determines if each mapping is a user or group by checking CRN structure
+   - Identifies entity names and IDs from CRN format
 
 3. **Validate Entries**:
 
-   - **Users**: Checks if user CRN exists in CDP
-   - **Groups**: Verifies group exists and has members
+   - **Users**: Checks if user CRN exists in loaded users set
+   - **Groups**: Verifies group exists in loaded groups or has members loaded
 
 4. **Generate Output**:
    - Creates clean mapping list with only valid entries
-   - Provides detailed validation report
+   - Preserves original data structure (environmentName, roles, etc.)
+   - Sets `setEmptyMappings` flag appropriately
    - Saves results to output file
 
 ### Performance Considerations
@@ -371,6 +670,108 @@ For large environments:
 - Consider increasing CDP CLI timeout settings
 - Monitor memory usage with very large datasets
 
+## API Documentation
+
+### Classes
+
+#### `IDBrokerMappingValidator`
+
+Main validator class that provides functionality to validate IDBroker mappings by checking user/group existence in CDP.
+
+**Initialization:**
+
+```python
+validator = IDBrokerMappingValidator()
+```
+
+**Methods:**
+
+- **`run_cdp_command(command: List[str]) -> Dict`**
+
+  - Executes a CDP CLI command and returns parsed JSON output
+  - Raises `CDPCLIError` if command fails or output cannot be parsed
+
+- **`load_existing_users() -> None`**
+
+  - Loads all existing users from CDP and stores their CRNs
+  - Uses `cdp iam list-users` command with `--max-items 10000`
+  - Prints warning if users cannot be loaded
+
+- **`load_existing_groups() -> None`**
+
+  - Loads all existing groups from CDP and stores their CRNs
+  - Uses `cdp iam list-groups` command with `--max-items 10000`
+  - Prints warning if groups cannot be loaded
+
+- **`load_group_members(group_crns: Set[str]) -> None`**
+
+  - Loads members for specific groups using CDP CLI
+  - Uses `cdp iam list-group-members` for each group
+  - Only loads members for groups that appear in mappings
+
+- **`extract_entity_name_from_crn(crn: str) -> Optional[str]`**
+
+  - Extracts entity name from a CDP CRN
+  - Supports both user and group CRNs
+  - Returns entity name if found, None otherwise
+
+- **`parse_mapping(mapping: Dict) -> MappingInfo`**
+
+  - Parses a mapping entry and extracts structured information
+  - Determines if mapping is for a user or group
+  - Extracts entity name and entity ID from CRN
+  - Returns `MappingInfo` object with parsed data
+
+- **`validate_user_mapping(mapping_info: MappingInfo) -> bool`**
+
+  - Validates if a user mapping exists in CDP
+  - Returns True if user CRN exists in loaded users, False otherwise
+
+- **`validate_group_mapping(mapping_info: MappingInfo) -> bool`**
+
+  - Validates if a group mapping exists and has members
+  - Returns True if group exists in CDP or has loaded members, False otherwise
+
+- **`validate_mappings(mappings: List[Dict]) -> None`**
+
+  - Validates all mappings and categorizes them as valid or invalid
+  - Automatically loads group members for groups in mappings
+  - Updates `validated_mappings` and `invalid_mappings` lists
+  - Prints validation results to console
+
+- **`create_clean_mapping_list(original_data: Dict) -> Dict`**
+
+  - Creates a new mapping list containing only valid mappings
+  - Preserves original data structure
+  - Sets `setEmptyMappings` flag based on validated mappings count
+  - Returns clean data structure ready for use
+
+- **`print_summary() -> None`**
+
+  - Prints detailed validation summary to console
+  - Shows total, valid, and invalid mappings count
+  - Lists all invalid mappings with entity names and CRNs
+
+- **`save_clean_mappings(output_file: str, clean_data: Dict) -> None`**
+
+  - Saves the clean mapping data to a JSON file
+  - Formats JSON with 2-space indentation
+
+#### Data Classes
+
+**`MappingInfo`**
+
+- `accessor_crn: str` - CDP accessor CRN
+- `role: str` - AWS IAM role ARN
+- `is_user: bool` - Whether the mapping is for a user
+- `is_group: bool` - Whether the mapping is for a group
+- `entity_id: str` - Extracted entity ID from CRN
+- `entity_name: str` - Extracted entity name from CRN
+
+#### Exceptions
+
+- **`CDPCLIError`** - Custom exception for CDP CLI command failures
+
 ## Examples
 
 ### Example 1: Basic Validation with Real Data
@@ -423,8 +824,19 @@ python3 validates_mappings.py /tmp/${ENV_NAME}_mappings.json --output /tmp/valid
 # Check exit code
 if [ $? -eq 0 ]; then
     echo "All mappings valid, proceeding with update"
-    # Use validated_mappings.json to update IDBroker mappings
-    # cdp environments set-id-broker-mappings --cli-input-json file:///tmp/validated_${ENV_NAME}_mappings.json
+
+    # Apply the validated mappings to the environment
+    CLEAN_FILE="/tmp/validated_${ENV_NAME}_mappings.json"
+    echo "Applying clean mappings to environment: $ENV_NAME"
+    cdp environments set-id-broker-mappings \
+      --cli-input-json "file://${CLEAN_FILE}"
+
+    if [ $? -eq 0 ]; then
+        echo "✓ IDBroker mappings successfully updated"
+    else
+        echo "✗ Failed to update IDBroker mappings"
+        exit 1
+    fi
 else
     echo "Invalid mappings found, review and fix"
     exit 1
