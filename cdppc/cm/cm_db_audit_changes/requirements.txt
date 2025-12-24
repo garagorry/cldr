@@ -1,0 +1,12 @@
+# Requirements for cm_comprehensive_audit_history.py
+#
+# Python version requirement
+# This script requires Python 3.6 or higher
+# Features used: f-strings, type hints, typing module
+
+# PostgreSQL database adapter for Python
+# psycopg2-binary is recommended for easier installation (includes pre-compiled binaries)
+psycopg2-binary>=2.9.0
+
+# Note: All other imports (argparse, csv, json, logging, os, sys, datetime, typing, collections)
+# are part of the Python standard library and do not need to be installed separately.
