@@ -31,6 +31,12 @@ except ImportError:
     print("ERROR: psycopg2 is required. Install it with: pip install psycopg2-binary")
     sys.exit(1)
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    print("ERROR: tqdm is required. Install it with: pip install tqdm")
+    sys.exit(1)
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -138,13 +144,14 @@ class CMDatabaseConnection:
             logger.error(f"❌ Failed to connect to database: {e}")
             raise
     
-    def execute_query(self, query: str, params: Optional[Tuple] = None) -> List[Dict]:
+    def execute_query(self, query: str, params: Optional[Tuple] = None, show_progress: bool = False) -> List[Dict]:
         """
         Execute a SQL query and return results as list of dictionaries.
         
         Args:
             query: SQL query string
             params: Optional tuple of parameters for parameterized queries
+            show_progress: If True, show progress bar for long-running queries
             
         Returns:
             List of dictionaries, each representing a row
@@ -157,8 +164,26 @@ class CMDatabaseConnection:
         
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, params)
-                return [dict(row) for row in cursor.fetchall()]
+                if show_progress:
+                    # Execute query with progress indicator
+                    with tqdm(desc="Executing query", unit="", ncols=100, leave=False, bar_format='{desc}: {elapsed}') as pbar:
+                        cursor.execute(query, params)
+                        pbar.set_description("Fetching results")
+                        
+                        # Fetch in chunks to show progress
+                        results = []
+                        chunk_size = 1000
+                        while True:
+                            chunk = cursor.fetchmany(chunk_size)
+                            if not chunk:
+                                break
+                            results.extend([dict(row) for row in chunk])
+                            pbar.update(len(chunk))
+                            pbar.set_postfix(rows=len(results))
+                        return results
+                else:
+                    cursor.execute(query, params)
+                    return [dict(row) for row in cursor.fetchall()]
         except psycopg2.Error as e:
             logger.error(f"Query execution failed: {e}")
             logger.error(f"Query: {query[:200]}...")
@@ -258,7 +283,7 @@ class CMAuditHistoryCollector:
         
         query += " ORDER BY r.timestamp DESC"
         
-        results = self.db.execute_query(query, tuple(params))
+        results = self.db.execute_query(query, tuple(params), show_progress=True)
         
         for row in results:
             row['event_type'] = 'CONFIG_CHANGE'
@@ -342,7 +367,7 @@ class CMAuditHistoryCollector:
         
         query += " ORDER BY COALESCE(c.start_instant, c.creation_instant) DESC"
         
-        results = self.db.execute_query(query, tuple(params) if params else None)
+        results = self.db.execute_query(query, tuple(params) if params else None, show_progress=True)
         
         for row in results:
             row['event_type'] = 'COMMAND_EXECUTION'
@@ -427,7 +452,7 @@ class CMAuditHistoryCollector:
         
         query += " ORDER BY a.created_instant DESC"
         
-        results = self.db.execute_query(query, tuple(params))
+        results = self.db.execute_query(query, tuple(params), show_progress=True)
         
         for row in results:
             row['event_type'] = 'AUDIT_LOG'
@@ -487,7 +512,7 @@ class CMAuditHistoryCollector:
         
         query += " ORDER BY r.timestamp DESC"
         
-        results = self.db.execute_query(query, tuple(params))
+        results = self.db.execute_query(query, tuple(params), show_progress=True)
         
         for row in results:
             row['event_type'] = 'SERVICE_CHANGE'
@@ -543,7 +568,7 @@ class CMAuditHistoryCollector:
         
         query += " ORDER BY r.timestamp DESC"
         
-        results = self.db.execute_query(query, tuple(params))
+        results = self.db.execute_query(query, tuple(params), show_progress=True)
         
         for row in results:
             row['event_type'] = 'CLUSTER_CHANGE'
@@ -614,7 +639,7 @@ class CMAuditHistoryCollector:
         
         query += " ORDER BY r.timestamp DESC"
         
-        results = self.db.execute_query(query, tuple(params))
+        results = self.db.execute_query(query, tuple(params), show_progress=True)
         
         for row in results:
             row['event_type'] = 'ROLE_CHANGE'
@@ -624,13 +649,16 @@ class CMAuditHistoryCollector:
         return results
     
     def collect_all_history(self, start_time: Optional[int] = None,
-                           end_time: Optional[int] = None) -> List[Dict]:
+                           end_time: Optional[int] = None,
+                           sources: Optional[List[str]] = None) -> List[Dict]:
         """
-        Collect all audit history from all sources and combine into unified list.
+        Collect audit history from specified sources and combine into unified list.
         
         Args:
             start_time: Optional start timestamp (Unix epoch milliseconds)
             end_time: Optional end timestamp (Unix epoch milliseconds)
+            sources: Optional list of source names to include. If None, includes all sources.
+                    Valid values: 'configs', 'commands', 'audits', 'services', 'clusters', 'roles'
             
         Returns:
             Combined list of all history records, sorted chronologically
@@ -639,12 +667,52 @@ class CMAuditHistoryCollector:
         
         all_history = []
         
-        all_history.extend(self.get_config_changes(start_time, end_time))
-        all_history.extend(self.get_command_history(start_time, end_time))
-        all_history.extend(self.get_audit_logs(start_time, end_time))
-        all_history.extend(self.get_service_changes(start_time, end_time))
-        all_history.extend(self.get_cluster_changes(start_time, end_time))
-        all_history.extend(self.get_role_changes(start_time, end_time))
+        # Define all available query methods with their source identifiers
+        all_query_methods = {
+            'configs': ("Configuration Changes", self.get_config_changes),
+            'commands': ("Command Executions", self.get_command_history),
+            'audits': ("Audit Logs", self.get_audit_logs),
+            'services': ("Service Changes", self.get_service_changes),
+            'clusters': ("Cluster Changes", self.get_cluster_changes),
+            'roles': ("Role Changes", self.get_role_changes),
+        }
+        
+        # Determine which sources to query
+        if sources is None:
+            # Default: query all sources
+            sources_to_query = list(all_query_methods.keys())
+        else:
+            # Validate and filter sources
+            valid_sources = set(all_query_methods.keys())
+            requested_sources = set(s.lower() for s in sources)
+            invalid_sources = requested_sources - valid_sources
+            if invalid_sources:
+                raise ValueError(f"Invalid source(s): {', '.join(invalid_sources)}. "
+                               f"Valid sources are: {', '.join(sorted(valid_sources))}")
+            sources_to_query = [s for s in all_query_methods.keys() if s in requested_sources]
+        
+        if not sources_to_query:
+            raise ValueError("At least one source must be specified")
+        
+        # Build list of query methods to execute
+        query_methods = [(all_query_methods[src][0], all_query_methods[src][1]) 
+                        for src in sources_to_query]
+        
+        logger.info(f"Querying {len(query_methods)} source(s): {', '.join([desc for desc, _ in query_methods])}")
+        
+        # Collect history with progress bar
+        with tqdm(total=len(query_methods), desc="Collecting history", unit="source", ncols=100) as pbar:
+            for desc, method in query_methods:
+                pbar.set_description(f"Querying {desc}")
+                try:
+                    results = method(start_time, end_time)
+                    all_history.extend(results)
+                    pbar.set_postfix(records=len(results))
+                except Exception as e:
+                    logger.error(f"Error querying {desc}: {e}")
+                    pbar.set_postfix(error=str(e)[:30])
+                finally:
+                    pbar.update(1)
         
         # Normalize timestamps for sorting
         for record in all_history:
@@ -877,23 +945,32 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Export all history to JSON
-  %(prog)s --format json -o history.json
+  # Export all history to JSON (default output directory: /tmp)
+  %(prog)s --format json
+  
+  # Export to custom directory with timestamped subdirectory
+  %(prog)s --format json --dir /var/tmp/cm_reports
   
   # Export last 7 days to CSV
-  %(prog)s --format csv --days 7 -o history.csv
+  %(prog)s --format csv --days 7 --dir /tmp
   
   # Export specific time range to text
-  %(prog)s --format text --start "2025-12-01T00:00:00" --end "2025-12-15T23:59:59" -o history.txt
+  %(prog)s --format text --start "2025-12-01T00:00:00" --end "2025-12-15T23:59:59" --dir /tmp
   
   # Export all formats
-  %(prog)s --format all -o history
+  %(prog)s --format all --dir /tmp
   
   # Export only configuration changes (automatically exports to JSON and CSV)
-  %(prog)s --changes -o config_changes
+  %(prog)s --changes --dir /tmp
   
-  # Export configuration changes for last 30 days
-  %(prog)s --changes --days 30 -o config_changes_last_30_days
+  # Export configuration changes for last 30 days to custom directory
+  %(prog)s --changes --days 30 --dir /var/tmp/audit_reports
+  
+  # Query only specific audit sources
+  %(prog)s --sources configs commands --dir /tmp
+  
+  # Query only configuration and audit log sources
+  %(prog)s --sources configs audits --days 7 --dir /tmp
         """
     )
     
@@ -904,9 +981,15 @@ Examples:
     )
     
     parser.add_argument(
+        '--dir',
+        default='/tmp',
+        help='Output directory for reports (default: %(default)s). A timestamped subdirectory will be created.'
+    )
+    
+    parser.add_argument(
         '-o', '--output',
         default=None,
-        help='Output file path (default: auto-generated with timestamp)'
+        help='Output file base name (default: auto-generated with timestamp). Files will be created in the timestamped directory.'
     )
     
     parser.add_argument(
@@ -945,6 +1028,17 @@ Examples:
     )
     
     parser.add_argument(
+        '--sources',
+        nargs='+',
+        choices=['configs', 'commands', 'audits', 'services', 'clusters', 'roles', 'all'],
+        default=['all'],
+        help='Audit sources to include in the report. Can specify multiple sources. '
+             'Valid values: configs, commands, audits, services, clusters, roles, all '
+             '(default: all). '
+             'Examples: --sources configs commands, --sources configs audits services'
+    )
+    
+    parser.add_argument(
         '--changes',
         action='store_true',
         help='Filter to show only configuration changes (CONFIG_CHANGE events). '
@@ -969,13 +1063,28 @@ Examples:
             end_time = parse_timestamp(args.end)
             logger.info(f"End time: {datetime.fromtimestamp(end_time / 1000).isoformat()}")
     
+    # Create timestamped output directory
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    output_dir = os.path.join(args.dir, f"cm_audit_{timestamp}")
+    
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Output directory: {output_dir}")
+    except OSError as e:
+        logger.error(f"Failed to create output directory '{output_dir}': {e}")
+        sys.exit(1)
+    
+    # Generate output file base name if not provided
     if not args.output:
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         hostname = os.uname().nodename if hasattr(os, 'uname') else 'localhost'
         if args.changes:
-            args.output = f"/tmp/CM_config_changes_{hostname}_{timestamp}"
+            args.output = os.path.join(output_dir, f"CM_config_changes_{hostname}_{timestamp}")
         else:
-            args.output = f"/tmp/CM_comprehensive_audit_{hostname}_{timestamp}"
+            args.output = os.path.join(output_dir, f"CM_comprehensive_audit_{hostname}_{timestamp}")
+    else:
+        # If output is provided, ensure it's in the timestamped directory
+        base_name = os.path.basename(args.output)
+        args.output = os.path.join(output_dir, base_name)
     
     try:
         db = CMDatabaseConnection(args.db_properties)
@@ -989,7 +1098,12 @@ Examples:
         collector = CMAuditHistoryCollector(db)
         collector.excluded_users = args.exclude_users
         
-        history = collector.collect_all_history(start_time, end_time)
+        # Process --sources argument
+        sources_to_query = None
+        if 'all' not in args.sources:
+            sources_to_query = args.sources
+        
+        history = collector.collect_all_history(start_time, end_time, sources=sources_to_query)
         
         if not history:
             logger.warning("No history records found")
@@ -1013,6 +1127,7 @@ Examples:
             logger.info(f"✅ Configuration changes exported to:")
             logger.info(f"   - JSON: {args.output}.json")
             logger.info(f"   - CSV: {args.output}.csv")
+            logger.info(f"   - Output directory: {output_dir}")
         else:
             if args.format == 'json' or args.format == 'all':
                 HistoryExporter.export_json(history, f"{args.output}.json")
@@ -1024,6 +1139,7 @@ Examples:
                 HistoryExporter.export_text(history, f"{args.output}.txt")
             
             logger.info("✅ Audit history collection completed successfully")
+            logger.info(f"   - Output directory: {output_dir}")
         
     except Exception as e:
         logger.error(f"Error during history collection: {e}", exc_info=True)

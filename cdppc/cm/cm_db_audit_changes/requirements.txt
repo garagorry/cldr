@@ -8,5 +8,8 @@
 # psycopg2-binary is recommended for easier installation (includes pre-compiled binaries)
 psycopg2-binary>=2.9.0
 
+# Progress bar library for long-running operations
+tqdm>=4.64.0
+
 # Note: All other imports (argparse, csv, json, logging, os, sys, datetime, typing, collections)
 # are part of the Python standard library and do not need to be installed separately.
