@@ -85,7 +85,7 @@ class AWSIAMRoleValidator:
             aws_profile: AWS CLI profile name to use (optional)
         """
         self.aws_profile = aws_profile
-        self.existing_roles: Dict[str, Dict] = {}  # role_arn -> role details
+        self.existing_roles: Dict[str, Dict] = {}
         self.validated_mappings: List[Dict] = []
         self.invalid_mappings: List[Dict] = []
         self.validation_results: Dict[str, RoleValidationResult] = {}
@@ -181,8 +181,6 @@ class AWSIAMRoleValidator:
         """
         print("\nChecking IAM permissions...")
         
-        # We'll do a soft check by attempting to list roles (if that fails, we know we don't have permissions)
-        # But we'll provide detailed guidance on what's needed
         try:
             result = subprocess.run(
                 ["aws", "iam", "list-roles", "--max-items", "1"] +
@@ -200,7 +198,6 @@ class AWSIAMRoleValidator:
             else:
                 error_msg = result.stderr.strip()
                 
-                # Check for specific permission errors
                 if "AccessDenied" in error_msg or "not authorized" in error_msg.lower():
                     raise AWSPermissionError(
                         "Insufficient IAM permissions.\n\n"
@@ -226,7 +223,6 @@ class AWSIAMRoleValidator:
                         f"Error from AWS: {error_msg}"
                     )
                 else:
-                    # Non-permission error, might work anyway
                     print(f"⚠️  Warning: Could not verify IAM permissions: {error_msg}")
                     print("   Continuing anyway - will fail later if permissions are insufficient")
                     return True
@@ -248,11 +244,9 @@ class AWSIAMRoleValidator:
         Raises:
             AWSCLIError: If command fails or output cannot be parsed
         """
-        # Add profile if specified
         if self.aws_profile:
             command.extend(["--profile", self.aws_profile])
         
-        # Always request JSON output
         if "--output" not in command:
             command.extend(["--output", "json"])
         
@@ -310,7 +304,6 @@ class AWSIAMRoleValidator:
         Returns:
             RoleValidationResult with validation details
         """
-        # Check cache first
         if role_arn in self.validation_results:
             return self.validation_results[role_arn]
         
@@ -340,7 +333,6 @@ class AWSIAMRoleValidator:
             
         except AWSCLIError as e:
             error_msg = str(e)
-            # Check if it's a "NoSuchEntity" error
             if "NoSuchEntity" in error_msg or "NotFound" in error_msg:
                 result = RoleValidationResult(
                     role_arn=role_arn,
@@ -394,7 +386,6 @@ class AWSIAMRoleValidator:
         """
         print(f"\nValidating {len(mappings)} mappings...")
         
-        # Extract unique roles first
         for mapping in mappings:
             mapping_info = self.parse_mapping(mapping)
             if mapping_info.role_arn:
@@ -402,7 +393,6 @@ class AWSIAMRoleValidator:
         
         print(f"Found {len(self.unique_roles)} unique AWS IAM roles to validate\n")
         
-        # Validate each mapping
         for idx, mapping in enumerate(mappings, 1):
             mapping_info = self.parse_mapping(mapping)
             
@@ -411,7 +401,6 @@ class AWSIAMRoleValidator:
                 print(f"[{idx}/{len(mappings)}] ✗ Missing role ARN for {mapping_info.entity_name}")
                 continue
             
-            # Validate the role
             validation_result = self.validate_role_existence(mapping_info.role_arn)
             
             entity_type = "user" if mapping_info.is_user else "group" if mapping_info.is_group else "unknown"
@@ -446,7 +435,6 @@ class AWSIAMRoleValidator:
             "invalid_mappings_details": []
         }
         
-        # Collect missing roles
         missing_roles_set = set()
         for role_arn, result in self.validation_results.items():
             if not result.exists:
@@ -457,7 +445,6 @@ class AWSIAMRoleValidator:
                     "error": result.error_message
                 })
         
-        # Collect invalid mapping details
         for mapping in self.invalid_mappings:
             mapping_info = self.parse_mapping(mapping)
             entity_type = "user" if mapping_info.is_user else "group" if mapping_info.is_group else "unknown"
@@ -487,7 +474,6 @@ class AWSIAMRoleValidator:
         print(f"Existing roles: {len(self.existing_roles)}")
         print(f"Missing roles: {len([r for r in self.validation_results.values() if not r.exists])}")
         
-        # Print missing roles
         missing_roles = [r for r in self.validation_results.values() if not r.exists]
         if missing_roles:
             print(f"\n{'='*70}")
@@ -499,7 +485,6 @@ class AWSIAMRoleValidator:
                 print(f"    ARN: {result.role_arn}")
                 print(f"    Error: {result.error_message}")
                 
-                # List which users/groups are mapped to this role
                 affected_entities = []
                 for mapping in self.invalid_mappings:
                     mapping_info = self.parse_mapping(mapping)
@@ -572,11 +557,10 @@ Examples:
     parser.add_argument("--output", "-o", default="clean_aws_mappings.json", 
                        help="Output file for clean mappings (default: clean_aws_mappings.json)")
     parser.add_argument("--report", "-r", default="aws_role_validation_report.json",
-                       help="Output file for validation report (default: aws_role_validation_report.json)")
+                       help="Output file for validation report (default: aws_role_validation_report.json)"    )
     
     args = parser.parse_args()
     
-    # Load input data
     if args.stdin:
         try:
             data = json.load(sys.stdin)
@@ -598,37 +582,27 @@ Examples:
         parser.print_help()
         sys.exit(1)
     
-    # Initialize validator
     validator = AWSIAMRoleValidator(aws_profile=args.aws_profile)
     
     try:
-        # Perform pre-flight checks
         print("Performing pre-flight checks...\n")
         validator.check_aws_cli_installed()
         validator.check_aws_credentials()
         validator.check_iam_permissions()
         print()
         
-        # Extract and validate mappings
         mappings = data.get("mappings", [])
         if not mappings:
             print("Warning: No mappings found in input data")
             sys.exit(0)
         
-        # Validate all mappings
         validator.validate_mappings(mappings)
-        
-        # Generate and display summary
         validator.print_summary()
         
-        # Generate detailed report
         report = validator.generate_report()
         validator.save_report(args.report, report)
-        
-        # Save clean mappings
         validator.save_clean_mappings(args.output, data)
         
-        # Exit with appropriate code
         if validator.invalid_mappings:
             print(f"\n⚠️  {len(validator.invalid_mappings)} invalid mappings were found.")
             print(f"Review the report ({args.report}) for details.")

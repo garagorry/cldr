@@ -4,7 +4,7 @@ This tool validates IDBroker mappings by checking if the AWS IAM roles exist usi
 
 ## Prerequisites
 
-1. **Python 3.6+** installed on your system
+1. **Python 3.9.6+** installed on your system
 2. **AWS CLI** installed and configured
 
    ```bash
@@ -20,12 +20,16 @@ This tool validates IDBroker mappings by checking if the AWS IAM roles exist usi
 ## Features
 
 - ✅ Validates AWS IAM role existence for all IDBroker mappings
-- ✅ Supports multiple AWS profiles
+- ✅ Supports multiple AWS profiles via `--aws-profile` option
 - ✅ Generates detailed validation reports in JSON format
 - ✅ Creates clean mapping files with only valid roles
 - ✅ Provides clear console output with validation status
 - ✅ Identifies which users/groups are affected by missing roles
 - ✅ Caches role validation to avoid duplicate AWS API calls
+- ✅ Performs automated pre-flight checks (AWS CLI, credentials, permissions)
+- ✅ Extracts and validates role names from ARNs
+- ✅ Parses CDP CRNs to extract entity information
+- ✅ Handles both user and group mappings
 
 ## Installation
 
@@ -525,6 +529,12 @@ Error: Invalid JSON in file: Expecting value: line 1 column 1 (char 0)
 ```bash
 cat mappings.json | jq .
 ```
+
+#### Exceptions
+
+- **`AWSCLIError`** - Custom exception for AWS CLI command failures
+- **`AWSCLINotFoundError`** - Custom exception for AWS CLI not being installed
+- **`AWSPermissionError`** - Custom exception for insufficient AWS permissions
 
 ## Comparison with validates_mappings.py
 
