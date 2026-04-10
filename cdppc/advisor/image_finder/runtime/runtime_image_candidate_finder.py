@@ -102,6 +102,21 @@ class RuntimeImageCandidateFinder:
     def get_image_timestamp(self, image: Dict) -> int:
         """Get the timestamp for comparison (prefer created, fallback to published)"""
         return image.get('created', image.get('published', 0))
+
+    def get_architecture(self, image: Dict) -> str:
+        """Normalize architecture values to x86_64/arm64 when possible."""
+        raw_arch = image.get('architecture')
+        if raw_arch is None:
+            return 'N/A'
+
+        arch = str(raw_arch).strip().lower()
+        if not arch or arch in {"n/a", "na", "none", "unknown", "null"}:
+            return 'N/A'
+        if arch in {"x86_64", "amd64"}:
+            return 'x86_64'
+        if arch in {"arm64", "aarch64"}:
+            return 'arm64'
+        return arch
     
     def extract_version(self, image: Dict) -> Optional[str]:
         """Extract version from image (repository-version or version field)"""
@@ -318,8 +333,8 @@ class RuntimeImageCandidateFinder:
         # Only enforce architecture match when the source architecture is known.
         # Some catalog entries omit architecture (shows as N/A). In that case, do not filter by architecture.
         if source_architecture:
-            candidate_architecture = image.get('architecture')
-            if candidate_architecture and candidate_architecture != source_architecture:
+            candidate_architecture = self.get_architecture(image)
+            if candidate_architecture != 'N/A' and candidate_architecture != source_architecture:
                 return False
         
         if 'images' not in image:
@@ -366,7 +381,7 @@ class RuntimeImageCandidateFinder:
         report.append(f"  Published: {self.format_timestamp(source_image.get('published', 0))}")
         report.append(f"  OS: {source_image.get('os', 'N/A')}")
         report.append(f"  OS Type: {source_image.get('os_type', 'N/A')}")
-        report.append(f"  Architecture: {source_image.get('architecture', 'N/A')}")
+        report.append(f"  Architecture: {self.get_architecture(source_image)}")
         
         source_version = self.extract_version(source_image)
         if source_version:
@@ -398,7 +413,7 @@ class RuntimeImageCandidateFinder:
                 report.append(f"  Published: {self.format_timestamp(image.get('published', 0))}")
                 report.append(f"  OS: {image.get('os', 'N/A')}")
                 report.append(f"  OS Type: {image.get('os_type', 'N/A')}")
-                report.append(f"  Architecture: {image.get('architecture', 'N/A')}")
+                report.append(f"  Architecture: {self.get_architecture(image)}")
                 
                 candidate_version = self.extract_version(image)
                 if candidate_version:
@@ -518,7 +533,7 @@ class RuntimeImageCandidateFinder:
             'Published': self.format_timestamp(image.get('published', 0)),
             'OS': image.get('os', 'N/A'),
             'OS_Type': image.get('os_type', 'N/A'),
-            'Architecture': image.get('architecture', 'N/A'),
+            'Architecture': self.get_architecture(image),
             'Repository_Version': repo_version,
             'Repository_ID': repo_id,
             'Build_Number': image.get('build-number', 'N/A'),
@@ -561,11 +576,9 @@ class RuntimeImageCandidateFinder:
             return False
         
         source_timestamp = self.get_image_timestamp(source_image)
-        # Normalize architecture: treat missing/placeholder values as unknown (None) so we don't over-filter
-        raw_arch = source_image.get('architecture')
-        if raw_arch and str(raw_arch).strip().lower() not in {"n/a", "na", "none", "unknown", "null"}:
-            source_architecture = raw_arch
-        else:
+        # Normalize architecture; use None for unknown so filtering remains permissive.
+        source_architecture = self.get_architecture(source_image)
+        if source_architecture == 'N/A':
             source_architecture = None
         source_version = self.extract_version(source_image)
         

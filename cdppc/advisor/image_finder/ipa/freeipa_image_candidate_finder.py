@@ -140,6 +140,23 @@ class FreeIPAImageCandidateFinder:
 
         return False
 
+    def get_architecture(self, image: Dict) -> str:
+        arch = (image.get("architecture") or "").strip().lower()
+        if arch in {"x86_64", "amd64"}:
+            return "x86_64"
+        if arch in {"arm64", "aarch64"}:
+            return "arm64"
+        return arch or "N/A"
+
+    def same_architecture(self, source_image: Dict, candidate_image: Dict) -> bool:
+        source_arch = self.get_architecture(source_image)
+        candidate_arch = self.get_architecture(candidate_image)
+
+        # Keep behavior permissive when catalog entries are missing architecture.
+        if source_arch == "N/A" or candidate_arch == "N/A":
+            return True
+        return source_arch == candidate_arch
+
     def find_newer_images(
         self,
         source_image: Dict,
@@ -173,6 +190,10 @@ class FreeIPAImageCandidateFinder:
             if not self.same_or_allowed_os(source_image, image, allow_major_os_upgrade):
                 continue
 
+            # Must match architecture (x86_64 or arm64)
+            if not self.same_architecture(source_image, image):
+                continue
+
             newer_images.append(image)
 
         # Sort by newest first
@@ -199,6 +220,7 @@ class FreeIPAImageCandidateFinder:
         lines.append(f"  Created: {self.format_timestamp(self.get_image_timestamp(source_image))}")
         lines.append(f"  OS: {source_image.get('os', 'N/A')}")
         lines.append(f"  OS Type: {source_image.get('os_type', 'N/A')}")
+        lines.append(f"  Architecture: {self.get_architecture(source_image)}")
         if 'package-versions' in source_image:
             lines.append("  Package Versions:")
             for pkg, ver in list(source_image.get('package-versions', {}).items())[:5]:
@@ -217,6 +239,7 @@ class FreeIPAImageCandidateFinder:
                 lines.append(f"  Created: {self.format_timestamp(self.get_image_timestamp(image))}")
                 lines.append(f"  OS: {image.get('os', 'N/A')}")
                 lines.append(f"  OS Type: {image.get('os_type', 'N/A')}")
+                lines.append(f"  Architecture: {self.get_architecture(image)}")
 
                 provider_images = image.get('images', {}).get(cloud_provider, {})
                 if cloud_provider == 'aws':
@@ -259,6 +282,7 @@ class FreeIPAImageCandidateFinder:
             'Created': self.format_timestamp(self.get_image_timestamp(image)),
             'OS': image.get('os', 'N/A'),
             'OS_Type': image.get('os_type', 'N/A'),
+            'Architecture': self.get_architecture(image),
             'Cloud_Provider': cloud_provider,
             'Region': 'N/A',
             'Image_ID': 'N/A',
@@ -300,7 +324,7 @@ class FreeIPAImageCandidateFinder:
         out_path = os.path.join(out_dir, output_file)
         with open(out_path, 'w', newline='', encoding='utf-8') as f:
             headers = [
-                'Image_Type', 'UUID', 'Date', 'Created', 'OS', 'OS_Type',
+                'Image_Type', 'UUID', 'Date', 'Created', 'OS', 'OS_Type', 'Architecture',
                 'Cloud_Provider', 'Region', 'Image_ID', 'Package_Versions'
             ]
             writer = csv.DictWriter(f, fieldnames=headers)
