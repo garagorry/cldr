@@ -55,6 +55,118 @@
                 fi
             }
 
+            # Resolve cipa binary (may live in /usr/local/bin when not in PATH)
+            _CIPA_BIN_CACHE=""
+            function resolve_cipa_bin() {
+                if [[ -n "${_CIPA_BIN_CACHE}" ]]; then
+                    echo "${_CIPA_BIN_CACHE}"
+                    return 0
+                fi
+
+                local candidate=""
+                if command -v cipa &>/dev/null; then
+                    candidate=$(command -v cipa)
+                elif [[ -x /usr/bin/cipa ]]; then
+                    candidate=/usr/bin/cipa
+                elif [[ -x /usr/local/bin/cipa ]]; then
+                    candidate=/usr/local/bin/cipa
+                else
+                    local path
+                    for path in $(whereis -b cipa 2>/dev/null | awk -F: '{print $2}'); do
+                        if [[ -n "${path}" && -x "${path}" ]]; then
+                            candidate="${path}"
+                            break
+                        fi
+                    done
+                fi
+
+                if [[ -z "${candidate}" || ! -x "${candidate}" ]]; then
+                    return 1
+                fi
+
+                _CIPA_BIN_CACHE="${candidate}"
+                echo "${candidate}"
+                return 0
+            }
+
+            function redhat_release_major() {
+                if [[ -f /etc/os-release ]]; then
+                    # shellcheck disable=SC1091
+                    source /etc/os-release
+                    echo "${VERSION_ID%%.*}"
+                    return 0
+                fi
+                if [[ -f /etc/redhat-release ]]; then
+                    sed -n 's/.*release \([0-9]\+\).*/\1/p' /etc/redhat-release | head -1
+                    return 0
+                fi
+                echo ""
+            }
+
+            function is_centos7() {
+                [[ -f /etc/redhat-release ]] || return 1
+                grep -qi 'centos' /etc/redhat-release || return 1
+                [[ "$(redhat_release_major)" == "7" ]]
+            }
+
+            function is_rhel8_or_newer() {
+                [[ -f /etc/redhat-release ]] || return 1
+                grep -qiE 'red hat enterprise linux' /etc/redhat-release || return 1
+                local major
+                major=$(redhat_release_major)
+                [[ -n "${major}" && "${major}" -ge 8 ]]
+            }
+
+            function yum_package_available() {
+                local package_name="$1"
+                yum list available "${package_name}" 2>/dev/null | grep -qE "^${package_name}\\."
+            }
+
+            function ensure_lsof_installed() {
+                if rpm -q lsof >/dev/null 2>&1; then
+                    return 0
+                fi
+
+                echo -e "lsof package is required [${YELLOW}MISSING${NC}]"
+
+                if is_centos7; then
+                    echo -e "Auto-install of lsof is disabled on CentOS 7."
+                    echo -e "Install manually when a package source is available: ${GREEN}yum install -y lsof${NC}"
+                    return 1
+                fi
+
+                if is_rhel8_or_newer; then
+                    echo -e "Checking if lsof is available in configured repositories..."
+                    if ! yum_package_available lsof; then
+                        echo -e "lsof is not available in configured repositories [${RED}SKIPPED${NC}]"
+                        echo -e "Enable a repository that provides lsof or install manually: ${GREEN}yum install -y lsof${NC}"
+                        return 1
+                    fi
+                fi
+
+                echo -e "Attempting to install lsof package..."
+
+                show_spinner "Installing lsof package" &
+                local spinner_pid=$!
+                local install_output
+                install_output=$(yum install -y lsof 2>&1)
+
+                kill $spinner_pid 2>/dev/null
+                wait $spinner_pid 2>/dev/null
+                echo -ne "\r\033[K"
+
+                if rpm -q lsof >/dev/null 2>&1; then
+                    echo -e "lsof package installed successfully [${GREEN}OK${NC}]"
+                    return 0
+                fi
+
+                echo -e "\nlsof package installation [${RED}FAILED${NC}]"
+                echo -e "Installation output:"
+                echo "$install_output"
+                echo -e "\nPlease install manually with: ${GREEN}yum install -y lsof${NC}"
+                return 1
+            }
+
             function log_message() {
                 local level="$1"
                 local message="$2"
@@ -397,12 +509,20 @@
 
             function freeipa_cipa_check() {
                 log_message "INFO" "Starting FreeIPA replication CIPA consistency check"
+
+                local cipa_bin
+                if ! cipa_bin=$(resolve_cipa_bin); then
+                    echo -e "FreeIPA Replication CIPA test [${RED}FAILED${NC}]"
+                    log_message "ERROR" "cipa not found (checked PATH, /usr/bin/cipa, /usr/local/bin/cipa, whereis)"
+                    return 1
+                fi
+                log_message "INFO" "Using cipa: ${cipa_bin}"
                 
                 # Show spinner for CIPA check
                 show_spinner "Running CIPA replication consistency check" &
                 local spinner_pid=$!
                 
-                local cipa_status=$(/usr/bin/cipa -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password') | sed -ne '3,$p' | awk '/[^\+-]/ {print $(NF -1)}' | sort -u | grep -v '|$' | wc -l)
+                local cipa_status=$("${cipa_bin}" -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password') | sed -ne '3,$p' | awk '/[^\+-]/ {print $(NF -1)}' | sort -u | grep -v '|$' | wc -l)
                 
                 # Stop spinner and clear line
                 kill $spinner_pid 2>/dev/null
@@ -411,11 +531,11 @@
                 
                 if [[ ${cipa_status} -eq 1 ]]; then
                     echo -e "FreeIPA Replication CIPA test [${GREEN}PASS${NC}]"
-                    /usr/bin/cipa -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
+                    "${cipa_bin}" -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
                     return 0
                 else
                     echo -e "FreeIPA Replication CIPA test [${RED}FAILED${NC}]"
-                    /usr/bin/cipa -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
+                    "${cipa_bin}" -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
                     return 1
                 fi
             }
@@ -999,35 +1119,9 @@
                 log_message "INFO" "Starting port validation check"
                 
                 echo -e "Checking required FreeIPA ports..."
-                
-                # Check if lsof is installed, try to install if missing
-                if ! rpm -q lsof >/dev/null 2>&1; then
-                    echo -e "lsof package is required [${YELLOW}MISSING${NC}]"
-                    echo -e "Attempting to install lsof package..."
-                    
-                    # Show spinner during installation
-                    show_spinner "Installing lsof package" &
-                    local spinner_pid=$!
-                    
-                    # Try to install using yum
-                    local install_output=$(yum install -y lsof 2>&1)
-                    local install_status=$?
-                    
-                    # Stop spinner
-                    kill $spinner_pid 2>/dev/null
-                    wait $spinner_pid 2>/dev/null
-                    echo -ne "\r\033[K"
-                    
-                    # Verify installation succeeded
-                    if rpm -q lsof >/dev/null 2>&1; then
-                        echo -e "lsof package installed successfully [${GREEN}OK${NC}]"
-                    else
-                        echo -e "\nlsof package installation [${RED}FAILED${NC}]"
-                        echo -e "Installation output:"
-                        echo "$install_output"
-                        echo -e "\nPlease install manually with: ${GREEN}yum install -y lsof${NC}"
-                        return 1
-                    fi
+
+                if ! ensure_lsof_installed; then
+                    return 1
                 fi
                 
                 local port_list="22 88 53 80 3080 749 464 8005 8009 8080 8443 4505 4506 389 636"
@@ -1143,27 +1237,147 @@
                 fi
             }
 
+            # Function: freeipa_strip_ansi
+            # Description: Removes ANSI escape sequences from command output
+            function freeipa_strip_ansi() {
+                sed -e 's/\x1b\[[0-9;]*m//g' -e 's/\?\[[0-9;]*m//g'
+            }
+
+            # Function: freeipa_trim_line
+            # Description: Strips leading/trailing whitespace (Salt indents cmd.run output)
+            function freeipa_trim_line() {
+                local line="$1"
+                line="${line#"${line%%[![:space:]]*}"}"
+                line="${line%"${line##*[![:space:]]}"}"
+                echo "$line"
+            }
+
+            # Function: freeipa_print_ccm_node_result
+            # Description: Prints per-node CCM check summary including nc output
+            function freeipa_print_ccm_node_result() {
+                local node="$1" ccm="$2" nc="$3" target="$4" detail="$5"
+                local ccm_color="${GREEN}" nc_color="${GREEN}"
+                [[ "${ccm}" != "PASS" ]] && ccm_color="${RED}"
+                [[ "${nc}" != "PASS" ]] && nc_color="${RED}"
+                [[ -z "${ccm}" ]] && ccm="UNKNOWN"
+                [[ -z "${nc}" ]] && nc="UNKNOWN"
+                [[ -z "${target}" ]] && target="unknown"
+                echo -e "  ${YELLOW}${node}${NC}:"
+                echo -e "    cdp-doctor CCM accessible [${ccm_color}${ccm}${NC}]"
+                echo -e "    nc -zv ${target} [${nc_color}${nc}${NC}]"
+                if [[ -n "${detail}" ]]; then
+                    echo -e "      ${detail}"
+                fi
+            }
+
             # Function: freeipa_ccm_check
-            # Description: Validates CCM (Cluster Connectivity Manager) availability and status
-            # Returns: 0 if CCM is working, 1 if not
+            # Description: Validates CCM on all FreeIPA nodes (cdp-doctor + nc TCP check to :443)
+            # Returns: 0 if every node passes both checks, 1 otherwise
             # Usage: freeipa_ccm_check
             function freeipa_ccm_check() {
-                log_message "INFO" "Starting CCM availability check"
+                log_message "INFO" "Starting CCM availability check across all FreeIPA nodes"
                 
-                if freeipa_is_ccm_enabled; then
-                    # Check CCM network and service status
-                    if cdp-doctor ccm status 2>/dev/null | grep True >/dev/null 2>&1; then
-                        echo -e "CCM Available [${GREEN}PASS${NC}]"
-                        return 0
-                    else
-                        echo -e "\nCCM Available [${RED}FAILED${NC}]\n"
-                        cdp-doctor ccm status 2>/dev/null | sed -e 's/\?\[92m//g' -e 's/\?\[0m//g' | grep -v Connectivity
-                        return 1
-                    fi
-                else
+                if ! freeipa_is_ccm_enabled; then
                     echo -e "CCM is not enabled - skipping check"
                     return 0
                 fi
+
+                source activate_salt_env
+                echo -e "Checking CCM availability across FreeIPA nodes (cdp-doctor + nc)..."
+
+                show_spinner "Checking CCM availability across all nodes" &
+                local spinner_pid=$!
+
+                local ccm_results=$(salt '*' cmd.run '
+_ccm_out=$(cdp-doctor ccm status 2>/dev/null | sed -e "s/\x1b\[[0-9;]*m//g" -e "s/\?\[[0-9;]*m//g")
+ccm_endpoint=$(echo "$_ccm_out" | awk -F"|" "/CCM address/ { gsub(/^[ \t]+|[ \t]+$/, \"\", \$3); print \$3; exit }")
+
+if echo "$_ccm_out" | grep -qE "CCM is accessible.*True"; then
+    echo "CCM_CHECK=PASS"
+else
+    echo "CCM_CHECK=FAIL"
+fi
+
+if [[ -z "$ccm_endpoint" ]]; then
+    echo "NC_TARGET=unknown"
+    echo "NC_CHECK=FAIL"
+    echo "NC_DETAIL=unable to parse CCM address from cdp-doctor ccm status"
+else
+    ccm_host="${ccm_endpoint%:*}"
+    ccm_port="${ccm_endpoint##*:}"
+    [[ "$ccm_port" == "$ccm_endpoint" ]] && ccm_port=443
+    echo "NC_TARGET=${ccm_host}:${ccm_port}"
+
+    if ! command -v nc >/dev/null 2>&1; then
+        echo "NC_CHECK=FAIL"
+        echo "NC_DETAIL=nc command not found"
+    else
+        echo "NC_CMD=nc -zv -w 5 ${ccm_host} ${ccm_port}"
+        nc_out=$(nc -zv -w 5 "$ccm_host" "$ccm_port" 2>&1)
+        nc_rc=$?
+        echo "NC_DETAIL=${nc_out}"
+        if [[ $nc_rc -eq 0 ]]; then
+            echo "NC_CHECK=PASS"
+        else
+            echo "NC_CHECK=FAIL"
+        fi
+    fi
+fi
+' 2>/dev/null)
+
+                kill $spinner_pid 2>/dev/null
+                wait $spinner_pid 2>/dev/null
+                echo -ne "\r\033[K"
+
+                deactivate
+
+                local total_nodes=$(echo "$ccm_results" | grep -cE "^[^[:space:]].*:$" || true)
+                if [[ ${total_nodes} -eq 0 ]]; then
+                    echo -e "CCM Available [${RED}FAILED${NC}] - unable to run check across nodes (Salt unavailable or no minions responded)"
+                    return 1
+                fi
+
+                local current_node=""
+                local pending_ccm="" pending_nc="" pending_target="" pending_nc_detail=""
+                local ccm_failed=0 nc_failed=0
+
+                while IFS= read -r line; do
+                    line=$(freeipa_trim_line "$line")
+                    if [[ "$line" =~ ^[^[:space:]].*:$ ]]; then
+                        if [[ -n "${current_node}" ]]; then
+                            [[ "${pending_ccm}" != "PASS" ]] && ccm_failed=$((ccm_failed + 1))
+                            [[ "${pending_nc}" != "PASS" ]] && nc_failed=$((nc_failed + 1))
+                            freeipa_print_ccm_node_result "${current_node}" "${pending_ccm}" "${pending_nc}" "${pending_target}" "${pending_nc_detail}"
+                        fi
+                        current_node="${line%:}"
+                        pending_ccm="" pending_nc="" pending_target="unknown" pending_nc_detail=""
+                    else
+                        case "$line" in
+                            CCM_CHECK=*) pending_ccm="${line#CCM_CHECK=}" ;;
+                            NC_TARGET=*) pending_target="${line#NC_TARGET=}" ;;
+                            NC_CHECK=*) pending_nc="${line#NC_CHECK=}" ;;
+                            NC_DETAIL=*) pending_nc_detail="${line#NC_DETAIL=}" ;;
+                        esac
+                    fi
+                done <<< "$ccm_results"
+
+                if [[ -n "${current_node}" ]]; then
+                    [[ "${pending_ccm}" != "PASS" ]] && ccm_failed=$((ccm_failed + 1))
+                    [[ "${pending_nc}" != "PASS" ]] && nc_failed=$((nc_failed + 1))
+                    freeipa_print_ccm_node_result "${current_node}" "${pending_ccm}" "${pending_nc}" "${pending_target}" "${pending_nc_detail}"
+                fi
+
+                if [[ ${ccm_failed} -eq 0 && ${nc_failed} -eq 0 ]]; then
+                    echo -e "\nCCM Available [${GREEN}PASS${NC}] - all nodes (${total_nodes}/${total_nodes}) pass cdp-doctor and nc checks"
+                    return 0
+                fi
+
+                echo -e "\nCCM Available [${RED}FAILED${NC}] - cdp-doctor failures: ${ccm_failed}/${total_nodes}, nc failures: ${nc_failed}/${total_nodes}"
+                echo -e "\nDetailed CCM status per node:\n"
+                source activate_salt_env
+                salt '*' cmd.run 'cdp-doctor ccm status 2>/dev/null | grep -v "^Connectivity checks:"' 2>/dev/null | freeipa_strip_ansi
+                deactivate
+                return 1
             }
 
             # Function: freeipa_ccm_network_status_check
@@ -1330,27 +1544,51 @@
             # Usage: freeipa_ldap_conflicts_check
             function freeipa_ldap_conflicts_check() {
                 log_message "INFO" "Starting LDAP conflicts check"
+
+                local cipa_bin
+                if ! cipa_bin=$(resolve_cipa_bin); then
+                    echo -e "FreeIPA LDAP Conflicts [${RED}FAILED${NC}]"
+                    log_message "ERROR" "cipa not found (checked PATH, /usr/bin/cipa, /usr/local/bin/cipa, whereis)"
+                    return 1
+                fi
                 
                 local ldap_srv=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.hosts[].fqdn' | tail -n 1)
                 local bind_dn="cn=Directory Manager"
                 local pw=$(sed '1d' /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
                 
+                local cipa_password
+                cipa_password=$(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password')
+
                 # Show spinner for LDAP conflicts check
                 show_spinner "Checking for LDAP conflicts" &
                 local spinner_pid=$!
-                
-                local ldap_conflicts_check=$(/usr/bin/cipa -d $(hostname -d) -W $(tail -n +2 /srv/pillar/freeipa/init.sls | jq -r '.freeipa.password') | awk '/LDAP Conflicts/ {print $5,$7,$9}' | grep 0 >/dev/null 2>&1 && echo $?)
+
+                local cipa_output
+                cipa_output=$("${cipa_bin}" -d "$(hostname -d)" -W "${cipa_password}" 2>/dev/null)
+
+                # PASS only when LDAP Conflicts row exists, STATE is not FAIL, and all counts are 0
+                local ldap_conflicts_ok
+                ldap_conflicts_ok=$(echo "$cipa_output" | awk '/LDAP Conflicts/ {
+                    if ($0 ~ /FAIL/) { print 0; next }
+                    ok = 1
+                    for (i = 1; i <= NF; i++) {
+                        if ($i ~ /^[0-9]+$/ && $i + 0 > 0) ok = 0
+                    }
+                    print ok
+                }')
                 
                 # Stop spinner and clear line
                 kill $spinner_pid 2>/dev/null
                 wait $spinner_pid 2>/dev/null
                 echo -ne "\r\033[K"
                 
-                if [[ ${ldap_conflicts_check} -eq 0 ]]; then
+                if [[ "${ldap_conflicts_ok}" == "1" ]]; then
                     echo -e "FreeIPA LDAP Conflicts [${GREEN}PASS${NC}]"
                     return 0
                 else
                     echo -e "\nFreeIPA LDAP Conflicts [${RED}FAILED${NC}]\n"
+                    echo "$cipa_output" | awk '/LDAP Conflicts/'
+                    echo
                     local user_group_ldap_conflict=$(ldapsearch -H ldap://${ldap_srv} -o ldif-wrap=no -D "${bind_dn}" -w ${pw} "(&(objectClass=ldapSubEntry)(nsds5ReplConflict=*))" \* nsds5ReplConflict | awk -F '[ |=|,]' '/nsds5ReplConflict.*cn=users/ || /nsds5ReplConflict.*cn=groups/ {print $5}' | sort -u | wc -l)
                     if [[ ${user_group_ldap_conflict} -ne 0 ]]; then
                         echo -e "${RED}Users or Groups in Conflict${NC}"

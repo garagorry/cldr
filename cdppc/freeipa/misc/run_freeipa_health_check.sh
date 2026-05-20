@@ -170,6 +170,20 @@ function show_banner() {
     echo
 }
 
+# Function: cipa_available - Locate cipa when not in default PATH
+function cipa_available() {
+    command -v cipa &>/dev/null && return 0
+    [[ -x /usr/bin/cipa ]] && return 0
+    [[ -x /usr/local/bin/cipa ]] && return 0
+    local path
+    for path in $(whereis -b cipa 2>/dev/null | awk -F: '{print $2}'); do
+        if [[ -n "${path}" && -x "${path}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Function: validate_environment - Check prerequisites
 function validate_environment() {
     log_message "INFO" "Validating environment and prerequisites..."
@@ -212,7 +226,9 @@ function validate_environment() {
     local missing_tools=()
     
     for tool in "${required_tools[@]}"; do
-        if ! command -v "$tool" &> /dev/null; then
+        if [[ "$tool" == "cipa" ]]; then
+            cipa_available || missing_tools+=("$tool")
+        elif ! command -v "$tool" &> /dev/null; then
             missing_tools+=("$tool")
         fi
     done
